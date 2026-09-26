@@ -84,6 +84,7 @@ def collect_diagnostics(
         ("gradio", "gradio", True),
         ("PyThaiTTS", "pythaitts", settings.tts.enabled),
         ("pythaiasr", "pythaiasr", False),
+        ("scipy", "scipy", settings.asr.enabled),
         ("onnxruntime", "onnxruntime", settings.tts.enabled),
         ("onnxruntime-gpu", "onnxruntime", False),
     ]:
@@ -115,6 +116,13 @@ def collect_diagnostics(
         ready = asr_model_available(settings.asr.model_dir)
         results.append(Check("OK" if ready else "WARN", "ASR model cache", f"{settings.asr.model_dir}; " + ("Typhoon ONNX files found." if ready else "missing; run python scripts/setup_asr_model.py.")))
         results.append(Check("OK", "ASR device", f"{settings.asr.device}; CPU-first configuration."))
+        results.append(
+            Check(
+                "OK",
+                "ASR audio decoding",
+                "SoundFile supports WAV, FLAC, MP3, and OGG; M4A requires an accessible local FFmpeg decoder.",
+            )
+        )
         results.append(Check("SKIP", "ASR inference", "model intentionally not loaded by doctor."))
     if settings.nlp.enabled and check_imports and not any(c.status == "FAIL" for c in results):
         try:

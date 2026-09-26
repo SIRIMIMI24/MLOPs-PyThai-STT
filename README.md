@@ -1,4 +1,4 @@
-# Thai Offline AI Workbench — Phase 3.5
+# Thai Offline AI Workbench — Phase 3.6
 
 A local, CPU-first Thai NLP application using **PyThaiNLP** and **Gradio**.
 The workbench supports Thai normalization, word and sentence tokenization, local
@@ -172,6 +172,32 @@ then select **หยุดและสรุปผล**. Confirm that the status
 without duplicate text, and that a second Start/Stop session begins with no text from
 the first. The Live status exposes the latest service latency and final session RTF;
 it does not claim end-to-end capture latency.
+
+## Phase 3.6: multi-format and batch ASR
+
+Single-file ASR now accepts locally decoded **WAV, FLAC, MP3, and OGG** files. These
+formats were verified with SoundFile 0.14.0 in this Windows environment. M4A is not
+currently supported because an accessible local FFmpeg decoder was not available;
+installing or downloading FFmpeg is never automatic and WAV support does not depend on it.
+
+Every supported file is decoded locally, mixed to mono, and resampled with SciPy's
+deterministic polyphase `resample_poly` implementation to 16 kHz PCM before it reaches
+PyThaiASR. The result retains source format, source sample rate, channels, original
+duration, normalized format, normalized sample rate, and normalized channels.
+
+Use sequential batch transcription to share one lazy model safely and isolate invalid
+files. It writes unique JSON and CSV exports below `outputs\batch`; JSON retains every
+structured `ASRResult` and segment, while CSV provides one useful row per file.
+
+```powershell
+.\.venv\Scripts\python.exe -m thai_offline_ai.cli asr call.mp3
+.\.venv\Scripts\python.exe -m thai_offline_ai.cli asr-batch C:\Audio\Calls --recursive
+```
+
+The ASR tab retains **Single File** and **Live Streaming** and adds **Batch Files**.
+The batch table exposes file name, status, duration, processing time, RTF, transcript
+preview, and an error when one input cannot be processed. No model loads until a
+single-file, batch, or live request actually reaches ASR.
 
 ## CLI and configuration
 

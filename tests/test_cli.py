@@ -5,6 +5,7 @@ import sys
 import pytest
 
 from thai_offline_ai.adapters.tts import TTSResult
+from thai_offline_ai.batch import BatchASRResult
 from thai_offline_ai.cli import main
 
 
@@ -78,3 +79,17 @@ def test_mocked_tts_cli(monkeypatch, tmp_path, capsys):
     )
     assert main(["tts", "สวัสดีครับ"]) == 0
     assert json.loads(capsys.readouterr().out)["sample_rate"] == 22050
+
+
+def test_mocked_batch_cli(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("THAI_AI_OUTPUT_DIR", str(tmp_path / "outputs"))
+    result = BatchASRResult("batch", 0, 0, 0, 0, 0)
+    monkeypatch.setattr("thai_offline_ai.cli.BatchASRProcessor.paths_in_directory", lambda *args, **kwargs: [])
+    monkeypatch.setattr("thai_offline_ai.cli.BatchASRProcessor.transcribe_paths", lambda *args: result)
+    monkeypatch.setattr(
+        "thai_offline_ai.cli.export_batch_result",
+        lambda *args: (tmp_path / "result.json", tmp_path / "result.csv"),
+    )
+    assert main(["asr-batch", str(tmp_path)]) == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["batch_id"] == "batch" and output["exports"]["csv"].endswith("result.csv")

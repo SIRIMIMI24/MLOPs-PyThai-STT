@@ -9,6 +9,7 @@ from dataclasses import asdict
 from thai_offline_ai.adapters.asr import ASRAdapter
 from thai_offline_ai.adapters.nlp import NLPAdapter
 from thai_offline_ai.adapters.tts import TTSAdapter
+from thai_offline_ai.batch import BatchASRProcessor, export_batch_result
 from thai_offline_ai.config import load_settings
 from thai_offline_ai.errors import WorkbenchError
 from thai_offline_ai.runtime import prepare_runtime
@@ -25,9 +26,12 @@ def build_parser() -> argparse.ArgumentParser:
     tts = sub.add_parser("tts", help="Generate Thai speech locally")
     tts.add_argument("text", nargs="?", help="Thai text (quote text containing spaces)")
     tts.add_argument("--text", dest="text_option", help="Compatible alternative to positional text")
-    asr = sub.add_parser("asr", help="Transcribe a local WAV file")
+    asr = sub.add_parser("asr", help="Transcribe a supported local audio file")
     asr.add_argument("audio", nargs="?")
     asr.add_argument("--audio", dest="audio_option")
+    batch = sub.add_parser("asr-batch", help="Transcribe supported audio files in a local folder")
+    batch.add_argument("directory", help="Local folder containing WAV, FLAC, MP3, or OGG files")
+    batch.add_argument("--recursive", action="store_true", help="Include supported audio in subfolders")
     stream = sub.add_parser("stream-asr", help="Simulate local streaming ASR from a WAV file")
     stream.add_argument("audio", help="Path to a readable WAV file")
     stream.add_argument("--realtime", action="store_true", help="Feed chunks at their real duration")
@@ -58,8 +62,22 @@ def main(argv: Sequence[str] | None = None) -> int:
         prepare_runtime(settings)
         if args.command == "asr":
             if (args.audio is None) == (args.audio_option is None):
-                raise WorkbenchError("Provide one WAV path: asr audio.wav or asr --audio audio.wav.")
+                raise WorkbenchError("Provide one audio path: asr audio.wav or asr --audio audio.wav.")
             print(json.dumps(ASRAdapter(settings).transcribe_file(args.audio or args.audio_option).to_dict(), ensure_ascii=False, indent=2))
+            return 0
+        if args.command == "asr-batch":
+            processor = BatchASRProcessor(settings)
+            result = processor.transcribe_paths(
+                processor.paths_in_directory(args.directory, recursive=args.recursive)
+            )
+            json_path, csv_path = export_batch_result(result, settings)
+            print(
+                json.dumps(
+                    {**result.to_dict(), "exports": {"json": str(json_path), "csv": str(csv_path)}},
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
             return 0
         if args.command == "stream-asr":
             import time

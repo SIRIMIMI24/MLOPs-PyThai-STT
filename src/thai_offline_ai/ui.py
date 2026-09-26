@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any
 from thai_offline_ai.adapters.asr import ASRAdapter
 from thai_offline_ai.adapters.nlp import NLPAdapter
 from thai_offline_ai.adapters.tts import TTSAdapter
+from thai_offline_ai.batch import BatchASRProcessor, export_batch_result
 from thai_offline_ai.config import Settings, load_settings
 from thai_offline_ai.errors import WorkbenchError
 from thai_offline_ai.runtime import prepare_runtime
@@ -64,6 +65,7 @@ def build_app(settings: Settings | None = None) -> tuple[gr.Blocks, Settings]:
     tts_adapter = TTSAdapter.from_settings(settings)
     asr_adapter = ASRAdapter(settings)
     streaming_service = StreamingASRService(settings)
+    batch_processor = BatchASRProcessor(settings, adapter=asr_adapter)
 
     def analyze(text: str) -> tuple[str, list[str], list[str], int]:
         try:
@@ -98,6 +100,33 @@ def build_app(settings: Settings | None = None) -> tuple[gr.Blocks, Settings]:
                 raise WorkbenchError("เลือกไฟล์ WAV ก่อนถอดเสียง")
             result = asr_adapter.transcribe_file(audio)
             return result.text, [segment.to_dict() for segment in result.segments], f"Duration: {result.duration:.2f}s · {result.backend} · {result.model}"
+        except WorkbenchError as exc:
+            raise gr.Error(str(exc)) from None
+
+    def transcribe_batch(files: list[str] | None) -> tuple[list[list[object]], str, str | None, str | None]:
+        try:
+            if not files:
+                raise WorkbenchError("เลือกไฟล์เสียงอย่างน้อยหนึ่งไฟล์ก่อนถอดเสียงแบบชุด")
+            result = batch_processor.transcribe_paths(files)
+            json_path, csv_path = export_batch_result(result, settings)
+            rows = []
+            for item in result.items:
+                rows.append(
+                    [
+                        item.file_name,
+                        item.status,
+                        f"{item.duration:.2f}" if item.duration is not None else "",
+                        f"{item.processing_time:.2f}" if item.processing_time is not None else "",
+                        f"{item.rtf:.2f}" if item.rtf is not None else "",
+                        item.asr_result.text[:120] if item.asr_result else "",
+                        item.error or "",
+                    ]
+                )
+            info = (
+                f"Batch {result.batch_id}: {result.succeeded} สำเร็จ, {result.failed} ล้มเหลว · "
+                f"Audio {result.total_audio_duration:.2f}s · Processing {result.total_processing_time:.2f}s"
+            )
+            return rows, info, str(json_path), str(csv_path)
         except WorkbenchError as exc:
             raise gr.Error(str(exc)) from None
 
@@ -213,6 +242,31 @@ def build_app(settings: Settings | None = None) -> tuple[gr.Blocks, Settings]:
             asr_segments = gr.JSON(label="ส่วนของเสียง (Segments)")
             asr_info = gr.Textbox(label="ข้อมูล", interactive=False)
             asr_button.click(transcribe, asr_audio, [asr_text, asr_segments, asr_info], api_name="transcribe")
+            gr.Markdown("### Batch Files (Phase 3.6)\nถอดเสียงหลายไฟล์แบบลำดับเพื่อใช้ CPU และโมเดลร่วมกันอย่างปลอดภัย")
+            batch_files = gr.File(
+                label="ไฟล์เสียงหลายไฟล์ (WAV, FLAC, MP3, OGG)",
+                file_count="multiple",
+                type="filepath",
+                file_types=["audio"],
+                interactive=settings.asr.enabled,
+            )
+            batch_button = gr.Button("ถอดเสียงแบบชุด", interactive=settings.asr.enabled)
+            batch_table = gr.Dataframe(
+                headers=["File", "Status", "Duration (s)", "Processing (s)", "RTF", "Transcript", "Error"],
+                datatype=["str"] * 7,
+                interactive=False,
+                label="ผลลัพธ์แบบชุด",
+            )
+            batch_info = gr.Textbox(label="สรุป Batch", interactive=False)
+            batch_json = gr.File(label="ส่งออก JSON", interactive=False)
+            batch_csv = gr.File(label="ส่งออก CSV", interactive=False)
+            batch_button.click(
+                transcribe_batch,
+                batch_files,
+                [batch_table, batch_info, batch_json, batch_csv],
+                api_name="transcribe_batch",
+                concurrency_limit=1,
+            )
             gr.Markdown(
                 "### Near Real-Time / Live (Phase 3.5)\n"
                 "เริ่ม session แล้วพูดผ่านไมโครโฟน ผลที่ถอดได้เป็นส่วนที่ยืนยันแล้ว; "
