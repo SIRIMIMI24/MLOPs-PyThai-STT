@@ -23,9 +23,10 @@ tts:
 asr:
   enabled: false
   backend: "pythaiasr"
-  model: null
+  model: "typhoon_asr"
   device: "cpu"
   sampling_rate: 16000
+  model_dir: "models/pythaiasr"
 
 llm:
   enabled: false

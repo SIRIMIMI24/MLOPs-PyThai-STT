@@ -40,9 +40,10 @@ class TTSConfig:
 class ASRConfig:
     enabled: bool = False
     backend: str = "pythaiasr"
-    model: str | None = None
+    model: str | None = "typhoon_asr"
     device: str = "cpu"
     sampling_rate: int = 16000
+    model_dir: str = "models/pythaiasr"
 
 
 @dataclass(slots=True)
@@ -91,6 +92,7 @@ ENV_FIELDS = {
     "THAI_AI_TTS_MODEL_DIR": ("tts", "model_dir"),
     "THAI_AI_ASR_ENABLED": ("asr", "enabled"),
     "THAI_AI_ASR_BACKEND": ("asr", "backend"),
+    "THAI_AI_ASR_MODEL_DIR": ("asr", "model_dir"),
     "THAI_AI_LLM_ENABLED": ("llm", "enabled"),
     "THAI_AI_LLM_BACKEND": ("llm", "backend"),
     "THAI_AI_LLM_BASE_URL": ("llm", "base_url"),
@@ -184,6 +186,10 @@ def validate_settings(settings: Settings) -> Settings:
     if model_dir == Path(model_dir.anchor) or str(model_dir).startswith(("\\\\", "//")):
         raise ConfigurationError("tts.model_dir must be a local folder, not a drive root/share.")
     settings.tts.model_dir = str(model_dir)
+    asr_dir = Path(settings.asr.model_dir).expanduser().resolve()
+    if asr_dir == Path(asr_dir.anchor) or str(asr_dir).startswith(("\\\\", "//")):
+        raise ConfigurationError("asr.model_dir must be a local folder, not a drive root/share.")
+    settings.asr.model_dir = str(asr_dir)
     return settings
 
 

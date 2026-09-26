@@ -104,6 +104,26 @@ The TTS tab loads the CPU ONNX model only after **สร้างเสียง
 missing local cache produces an actionable setup message and never falls back to a
 remote inference service.
 
+## Phase 3: local Thai ASR setup
+
+Install the ASR package and explicitly retrieve the Typhoon ONNX files once:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -e ".[asr,dev]"
+.\.venv\Scripts\python.exe scripts\setup_asr_model.py
+```
+
+The cache is stored under `models\pythaiasr\typhoon-asr-realtime`. File ASR accepts
+WAV uploads, converts them to mono 16 kHz PCM in a temporary local folder, and
+removes that temporary file after inference. Use `thai-offline-ai asr input.wav` or
+the ASR tab. Results include `text`, `segments`, duration, backend, and model;
+speaker and confidence remain `null` until a future diarization phase.
+
+The browser upload workflow was manually verified with a local WAV and real
+PyThaiASR transcription. Direct arbitrary local-path HTTP injection is intentionally
+rejected by Gradio's upload-cache security policy; this does not affect normal browser
+uploads. Phase 3 is file-based only: streaming and diarization are not implemented.
+
 ## CLI and configuration
 
 The original `--text` syntax remains supported:

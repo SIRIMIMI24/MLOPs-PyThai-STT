@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 from typing import TYPE_CHECKING, Any
 
+from thai_offline_ai.adapters.asr import ASRAdapter
 from thai_offline_ai.adapters.nlp import NLPAdapter
 from thai_offline_ai.adapters.tts import TTSAdapter
 from thai_offline_ai.config import Settings, load_settings
@@ -60,6 +61,7 @@ def build_app(settings: Settings | None = None) -> tuple[gr.Blocks, Settings]:
 
     adapter = NLPAdapter.from_config(settings.nlp, settings.app.offline_runtime)
     tts_adapter = TTSAdapter.from_settings(settings)
+    asr_adapter = ASRAdapter(settings)
 
     def analyze(text: str) -> tuple[str, list[str], list[str], int]:
         try:
@@ -85,6 +87,15 @@ def build_app(settings: Settings | None = None) -> tuple[gr.Blocks, Settings]:
                 f"Backend: {result.backend}; Model: {result.model}; "
                 f"Sample rate: {result.sample_rate} Hz"
             )
+        except WorkbenchError as exc:
+            raise gr.Error(str(exc)) from None
+
+    def transcribe(audio: str | None) -> tuple[str, list[dict[str, Any]], str]:
+        try:
+            if not audio:
+                raise WorkbenchError("เลือกไฟล์ WAV ก่อนถอดเสียง")
+            result = asr_adapter.transcribe_file(audio)
+            return result.text, [segment.to_dict() for segment in result.segments], f"Duration: {result.duration:.2f}s · {result.backend} · {result.model}"
         except WorkbenchError as exc:
             raise gr.Error(str(exc)) from None
 
@@ -139,7 +150,15 @@ def build_app(settings: Settings | None = None) -> tuple[gr.Blocks, Settings]:
             tts_button.click(synthesize, tts_source, [tts_audio, tts_info], api_name="synthesize")
             if not settings.tts.enabled:
                 gr.Markdown("TTS ถูกปิดอยู่ — ตั้งค่า `tts.enabled=true` หลังติดตั้งโมเดลในเครื่อง")
-        for title in ("ASR", "Local LLM"):
+        with gr.Tab("ASR"):
+            gr.Markdown("## ถอดเสียงภาษาไทย (Thai ASR)\nอัปโหลดไฟล์ WAV เพื่อถอดเสียงในเครื่อง")
+            asr_audio = gr.Audio(label="ไฟล์เสียง WAV", type="filepath", sources=["upload"], interactive=settings.asr.enabled)
+            asr_button = gr.Button("ถอดเสียง", interactive=settings.asr.enabled)
+            asr_text = gr.Textbox(label="ข้อความถอดเสียง", lines=5, interactive=False)
+            asr_segments = gr.JSON(label="ส่วนของเสียง (Segments)")
+            asr_info = gr.Textbox(label="ข้อมูล", interactive=False)
+            asr_button.click(transcribe, asr_audio, [asr_text, asr_segments, asr_info], api_name="transcribe")
+        for title in ("Local LLM",):
             with gr.Tab(title):
                 gr.Markdown(f"## {title}\nยังไม่พร้อมใช้งาน — สงวนไว้สำหรับระยะถัดไป (Future phase)")
         with gr.Tab("System"):

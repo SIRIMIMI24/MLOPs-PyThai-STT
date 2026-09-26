@@ -109,6 +109,13 @@ def collect_diagnostics(
         except Exception as exc:  # noqa: BLE001
             results.append(Check("WARN", "ONNX providers", f"not available ({type(exc).__name__})"))
         results.append(Check("SKIP", "TTS synthesis", "model intentionally not loaded by doctor."))
+    if settings.asr.enabled:
+        from thai_offline_ai.adapters.asr import model_is_available as asr_model_available
+
+        ready = asr_model_available(settings.asr.model_dir)
+        results.append(Check("OK" if ready else "WARN", "ASR model cache", f"{settings.asr.model_dir}; " + ("Typhoon ONNX files found." if ready else "missing; run python scripts/setup_asr_model.py.")))
+        results.append(Check("OK", "ASR device", f"{settings.asr.device}; CPU-first configuration."))
+        results.append(Check("SKIP", "ASR inference", "model intentionally not loaded by doctor."))
     if settings.nlp.enabled and check_imports and not any(c.status == "FAIL" for c in results):
         try:
             from thai_offline_ai.adapters.nlp import NLPAdapter
@@ -140,6 +147,8 @@ def collect_diagnostics(
             from thai_offline_ai.adapters.tts import model_is_available
 
             status = "OK" if model_is_available(settings.tts.model_dir) else "WARN"
+        elif name == "asr" and component.enabled:
+            status = "OK" if asr_model_available(settings.asr.model_dir) else "WARN"
         elif name == "nlp":
             status = "OK" if component.enabled else "SKIP"
         else:
@@ -149,6 +158,8 @@ def collect_diagnostics(
             detail += (
                 "; Phase 2 cache ready." if name == "tts" and status == "OK" else
                 "; run python scripts/setup_tts_model.py." if name == "tts" and component.enabled else
+                "; Phase 3 cache ready." if name == "asr" and status == "OK" else
+                "; run python scripts/setup_asr_model.py." if name == "asr" and component.enabled else
                 "; future phase, inference unavailable even when enabled."
             )
         results.append(Check(status, f"Component {name}", detail))
