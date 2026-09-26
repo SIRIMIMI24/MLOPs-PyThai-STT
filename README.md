@@ -1,9 +1,9 @@
-# Thai Offline AI Workbench — Phase 2
+# Thai Offline AI Workbench — Phase 3
 
 A local, CPU-first Thai NLP application using **PyThaiNLP** and **Gradio**.
 Phase 2 supports Thai normalization, word and sentence tokenization, token counts,
 Thai/Latin character counts, and local Thai TTS through PyThaiTTS Lunarlist ONNX.
-ASR and Local LLM remain future phases.
+and file-based local Thai ASR. Local LLM remains a future phase.
 
 TTS, ASR, LLM inference, and microphone input are reserved for later phases.
 No GPU, NVIDIA/CUDA, WSL, Docker, API key, or separately downloaded model is needed.
@@ -219,6 +219,15 @@ GPU, optional inference package, internet access, or model download is required.
 See [troubleshooting](docs/TROUBLESHOOTING.md),
 [architecture](docs/ARCHITECTURE.md), and
 [Phase 1 validation](docs/PHASE1_VALIDATION.md).
+
+## Future ASR accuracy roadmap
+
+Future Phase 3.7 establishes reproducible CER/WER/RTF evaluation on held-out
+real-human audio. Phase 3.8 adds local synthetic speech and controlled
+pseudo-labeling only after that baseline exists. Synthetic audio never enters the
+real-human validation or final test sets, and candidates are promoted only after
+measurable improvement on a fixed real holdout. See
+[the future ASR roadmap](docs/ASR_FUTURE_ROADMAP.md).
 
 ## Project layout
 

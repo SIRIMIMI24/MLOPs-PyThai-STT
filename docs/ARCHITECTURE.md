@@ -1,11 +1,12 @@
 # Architecture
 
-## Phase 2 implementation boundary
+## Phase 3 implementation boundary
 
-The diagram below remains the target architecture. Phase 2 exposes `NLPAdapter`
-and the CPU-only `TTSAdapter` through CLI and Gradio. TTS uses the verified
-PyThaiTTS 0.4.2 `lunarlist_onnx` backend and a configured local Hugging Face cache;
-the adapter forces cache-only loading at runtime. ASR and LLM tabs remain placeholders.
+Phase 3 exposes NLP, CPU-only TTS, and file-based CPU-only ASR through CLI and
+Gradio. ASR returns structured `ASRResult` and `SpeechSegment` values; speaker
+remains `None` until a future diarization phase. See
+[`ASR_FUTURE_ROADMAP.md`](ASR_FUTURE_ROADMAP.md) for the planned evaluation,
+synthetic-data, and controlled adaptation governance.
 
 Shared supporting modules preserve the existing boundaries:
 - `config.py`: strict dataclass/YAML/environment validation, including local endpoints.
@@ -80,7 +81,7 @@ class TTSAdapter:
     def synthesize(self, text: str, output_path: str, voice: str | None = None) -> str: ...
 
 class ASRAdapter:
-    def transcribe_file(self, audio_path: str) -> str: ...
+    def transcribe_file(self, audio_path: str) -> ASRResult: ...
 
 class LocalLLMAdapter:
     def chat(self, message: str, system_prompt: str | None = None) -> str: ...
