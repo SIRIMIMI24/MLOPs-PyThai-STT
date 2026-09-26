@@ -1,9 +1,9 @@
-# Thai Offline AI Workbench — Phase 3.7
+# Thai Offline AI Workbench — Phase 4
 
 A local, CPU-first Thai NLP application using **PyThaiNLP** and **Gradio**.
 The workbench supports Thai normalization, word and sentence tokenization, local
 Thai TTS through PyThaiTTS Lunarlist ONNX, file ASR, and near-real-time local ASR.
-Local LLM remains a future phase.
+Local LLM uses a configured Ollama model through a loopback-only endpoint.
 
 No GPU, NVIDIA/CUDA, WSL, Docker, or API key is required. TTS and ASR models are
 separate explicit setup downloads; normal runtime is cache-only.
@@ -227,6 +227,37 @@ They are written locally to `outputs\evaluation` as JSON and CSV. Synthetic TTS 
 may validate the engineering path but must be labelled **SYNTHETIC ENGINEERING SMOKE
 TEST**; it is never evidence of real-human ASR accuracy or a claim such as “95% accuracy.”
 
+## Phase 4: Local LLM
+
+Phase 4 supports the verified **Ollama** backend on a loopback endpoint only, normally
+`http://127.0.0.1:11434`. The model is configured under `llm.model`; the workbench does
+not start Ollama, pull a model, or contact the service at application startup. It sends
+only structured local `system`, `user`, and `assistant` messages when the user explicitly
+submits a chat request.
+
+Install Ollama for Windows separately, then use an explicit pull command. The target
+machine verified `scb10x/typhoon2.5-qwen3-4b:latest` as an already-installed 2.5 GB
+local model; model suitability depends on your hardware and task.
+
+```powershell
+ollama list
+ollama pull scb10x/typhoon2.5-qwen3-4b:latest
+.\.venv\Scripts\python.exe scripts\setup_llm_model.py
+```
+
+Set `llm.enabled: true` and the intended model in `config/settings.yaml`, then use:
+
+```powershell
+.\.venv\Scripts\python.exe -m thai_offline_ai.cli llm "กรุณาตอบสั้น ๆ ว่า กรุงเทพมหานครเป็นเมืองหลวงของประเทศไทยหรือไม่"
+.\.venv\Scripts\python.exe run_app.py
+```
+
+The **Local LLM** tab provides a system prompt, session-local chat, send, and clear.
+It reports backend/model/duration only; prompts and history are not persisted by the
+workbench. Doctor checks executable, loopback service, and listed configured model
+without generating text or pulling a model. A future llama.cpp adapter can implement
+the same `ChatMessage -> LLMResult` boundary, but is not part of Phase 4.
+
 ## CLI and configuration
 
 The original `--text` syntax remains supported:
@@ -237,8 +268,8 @@ The original `--text` syntax remains supported:
 .\.venv\Scripts\python.exe -m thai_offline_ai.cli doctor
 ```
 
-NLP, TTS, file ASR, and streaming-simulation commands print readable JSON. `chat`
-remains reserved for a future local-LLM phase.
+NLP, TTS, file ASR, streaming-simulation, evaluation, and local-LLM commands print
+readable JSON. The legacy `chat` command is reserved; use `llm` for local chat.
 
 Configuration order: **defaults → YAML → environment variables**.
 `config/settings.yaml` is optional; an explicitly supplied `--config` or
@@ -266,8 +297,9 @@ Other supported overrides: `THAI_AI_HOST`, `THAI_AI_CONFIG`,
 `THAI_AI_NLP_BACKEND`, `THAI_AI_NLP_WORD_ENGINE`, `THAI_AI_NLP_SENTENCE_ENGINE`,
 `THAI_AI_TTS_ENABLED`, `THAI_AI_TTS_BACKEND`, `THAI_AI_ASR_ENABLED`,
 `THAI_AI_ASR_BACKEND`, `THAI_AI_LLM_ENABLED`, `THAI_AI_LLM_BACKEND`, and
-`THAI_AI_LLM_BASE_URL`. Setting a future component to enabled does not make its
-inference available; doctor reports a warning.
+`THAI_AI_LLM_BASE_URL`, `THAI_AI_LLM_MODEL`, and `THAI_AI_LLM_SYSTEM_PROMPT`.
+Enabling LLM requires a locally installed Ollama model; doctor reports its separate
+service and model-list readiness without performing generation.
 
 The supported word engines are `newmm` and `newmm-safe`. Sentence engines are
 `crfcut` (default), `whitespace`, and `whitespace+newline`. CRFcut uses a small
@@ -279,7 +311,8 @@ in this project's core installation. No PyThaiNLP `full` extra is needed.
 - Gradio telemetry and version-check analytics are disabled before import and
   explicitly disabled on the app. Public sharing, SSR, MCP, and monitoring are off.
 - UI binding and configured LLM URLs are restricted to loopback. Cloud LLM URLs
-  are rejected even when offline mode is false. No LLM server is contacted in Phase 1.
+  are rejected even when offline mode is false. The LLM server is contacted only for
+  an explicit chat request or a doctor readiness check.
 - Offline runtime installs a process-wide Python audit hook rejecting external
   socket connections, DNS lookups, datagrams, and public socket binds. Redirects
   and proxy destinations must still pass this guard. Local startup checks bypass proxies.
@@ -297,8 +330,7 @@ native code, child processes, browser extensions, or unrelated programs.
 Keep `offline_runtime: true`; false disables installation of the socket guard in
 a fresh process, but never enables cloud backends or optional inference. Once
 installed, the guard cannot be removed until the process exits.
-The old optional adapter prototypes are not supported Phase 1 entry points and
-must be verified/hardened before a future phase exposes them.
+The workbench has no cloud fallback for local models.
 
 ## Validation and diagnostics
 
@@ -325,11 +357,11 @@ See [troubleshooting](docs/TROUBLESHOOTING.md),
 
 ## Future ASR accuracy roadmap
 
-Future Phase 3.7 establishes reproducible CER/WER/RTF evaluation on held-out
-real-human audio. Phase 3.8 adds local synthetic speech and controlled
-pseudo-labeling only after that baseline exists. Synthetic audio never enters the
-real-human validation or final test sets, and candidates are promoted only after
-measurable improvement on a fixed real holdout. See
+Phase 3.7 establishes reproducible CER/WER/RTF evaluation on held-out real-human
+audio. Future Phase 6.5 adds local synthetic speech and controlled pseudo-labeling
+only after that baseline exists. Synthetic audio never enters the real-human
+validation or final test sets, and candidates are promoted only after measurable
+improvement on a fixed real holdout. See
 [the future ASR roadmap](docs/ASR_FUTURE_ROADMAP.md).
 
 ## Project layout

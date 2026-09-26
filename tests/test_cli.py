@@ -7,6 +7,7 @@ import pytest
 from thai_offline_ai.adapters.tts import TTSResult
 from thai_offline_ai.batch import BatchASRResult
 from thai_offline_ai.cli import main
+from thai_offline_ai.llm_types import LLMResult
 
 
 @pytest.mark.parametrize("args", [["nlp", "ประเทศไทย"], ["nlp", "--text", "ประเทศไทย"]])
@@ -79,6 +80,18 @@ def test_mocked_tts_cli(monkeypatch, tmp_path, capsys):
     )
     assert main(["tts", "สวัสดีครับ"]) == 0
     assert json.loads(capsys.readouterr().out)["sample_rate"] == 22050
+
+
+def test_mocked_llm_cli(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("THAI_AI_OUTPUT_DIR", str(tmp_path / "outputs"))
+    monkeypatch.setenv("THAI_AI_LLM_ENABLED", "true")
+    monkeypatch.setattr(
+        "thai_offline_ai.adapters.llm.OllamaLocalLLM.chat",
+        lambda self, messages: LLMResult("คำตอบ", "ollama", self.model, duration=0.25),
+    )
+    assert main(["llm", "สวัสดีครับ"]) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["text"] == "คำตอบ" and result["backend"] == "ollama"
 
 
 def test_mocked_batch_cli(monkeypatch, tmp_path, capsys):

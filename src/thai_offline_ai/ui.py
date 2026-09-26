@@ -9,6 +9,7 @@ from thai_offline_ai.adapters.tts import TTSAdapter
 from thai_offline_ai.batch import BatchASRProcessor, export_batch_result
 from thai_offline_ai.config import Settings, load_settings
 from thai_offline_ai.errors import WorkbenchError
+from thai_offline_ai.llm_types import ChatMessage
 from thai_offline_ai.runtime import prepare_runtime
 from thai_offline_ai.streaming import StreamingASRService
 
@@ -183,6 +184,35 @@ def build_app(settings: Settings | None = None) -> tuple[gr.Blocks, Settings]:
         except WorkbenchError as exc:
             raise gr.Error(str(exc)) from None
 
+    def send_local_chat(
+        message: str, system_prompt: str, history: list[dict[str, str]] | None
+    ) -> tuple[list[dict[str, str]], str, str]:
+        try:
+            if not message.strip():
+                raise WorkbenchError("พิมพ์ข้อความก่อนส่งไปยัง Local LLM")
+            from thai_offline_ai.adapters.llm import OllamaLocalLLM
+
+            messages = [ChatMessage("system", system_prompt or settings.llm.system_prompt)]
+            messages.extend(ChatMessage(item["role"], item["content"]) for item in history or [])
+            messages.append(ChatMessage("user", message.strip()))
+            result = OllamaLocalLLM.from_config(settings.llm, settings.app.offline_runtime).chat(messages)
+            updated = [
+                *(history or []),
+                {"role": "user", "content": message.strip()},
+                {"role": "assistant", "content": result.text},
+            ]
+            detail = (
+                f"{result.backend} · {result.model} · {result.duration:.2f}s"
+                if result.duration is not None
+                else f"{result.backend} · {result.model}"
+            )
+            return updated, "", detail
+        except (WorkbenchError, ValueError) as exc:
+            raise gr.Error(str(exc)) from None
+
+    def clear_local_chat() -> tuple[list[dict[str, str]], str, str]:
+        return [], "", "Cleared local chat history."
+
     theme = gr.themes.Default(
         font=["Tahoma", "Arial", "sans-serif"], font_mono=["Consolas", "monospace"]
     )
@@ -195,10 +225,10 @@ def build_app(settings: Settings | None = None) -> tuple[gr.Blocks, Settings]:
         gr.Markdown("# Thai Offline AI Workbench\nเครื่องมือภาษาไทยบนคอมพิวเตอร์ของคุณ")
         with gr.Tab("Home"):
             gr.Markdown(
-                "## Phase 1: ภาษาไทย (NLP)\n"
+                "## Thai Offline AI Workbench\n"
                 "วิเคราะห์ข้อความด้วย CPU และข้อมูลที่ติดตั้งในเครื่อง "
                 "ข้อความและผลลัพธ์ไม่ถูกบันทึกเป็นไฟล์โดยแอป\n\n"
-                "TTS, ASR และ Local LLM จะเปิดใช้งานในระยะถัดไป"
+                "NLP, TTS, ASR และ Local LLM ใช้เฉพาะทรัพยากรในเครื่อง"
             )
         with gr.Tab("NLP"):
             if not settings.nlp.enabled:
@@ -295,9 +325,45 @@ def build_app(settings: Settings | None = None) -> tuple[gr.Blocks, Settings]:
                 stop_live_session, live_session, [live_session, live_partial, live_final, live_info],
                 api_name="stop_live_asr",
             )
-        for title in ("Local LLM",):
-            with gr.Tab(title):
-                gr.Markdown(f"## {title}\nยังไม่พร้อมใช้งาน — สงวนไว้สำหรับระยะถัดไป (Future phase)")
+        with gr.Tab("Local LLM"):
+            gr.Markdown(
+                "## Local LLM\n"
+                "Ollama บนเครื่องเท่านั้น: ไม่มี cloud fallback และจะเชื่อมต่อเมื่อกดส่งข้อความ"
+            )
+            gr.Markdown(
+                f"Backend: `{settings.llm.backend}` · Model: `{settings.llm.model}` · "
+                f"Endpoint: `{settings.llm.base_url}`"
+            )
+            llm_history = gr.State([])
+            llm_system = gr.Textbox(
+                label="System Prompt",
+                value=settings.llm.system_prompt,
+                lines=2,
+                interactive=settings.llm.enabled,
+            )
+            llm_chat = gr.Chatbot(label="Local Chat", type="messages")
+            llm_message = gr.Textbox(label="ข้อความ", lines=3, interactive=settings.llm.enabled)
+            with gr.Row():
+                llm_send = gr.Button("ส่งข้อความ", interactive=settings.llm.enabled)
+                llm_clear = gr.Button("ล้างประวัติ", interactive=settings.llm.enabled)
+            llm_status = gr.Textbox(label="สถานะ Local LLM", interactive=False)
+            llm_send.click(
+                send_local_chat,
+                [llm_message, llm_system, llm_history],
+                [llm_chat, llm_message, llm_status],
+                api_name="local_llm_chat",
+                concurrency_limit=1,
+            ).then(lambda history: history, llm_chat, llm_history)
+            llm_clear.click(
+                clear_local_chat,
+                outputs=[llm_chat, llm_message, llm_status],
+                api_name="clear_local_llm",
+            ).then(list, outputs=llm_history)
+            if not settings.llm.enabled:
+                gr.Markdown(
+                    "Local LLM ถูกปิดอยู่ — ตั้งค่า `llm.enabled=true` หลังติดตั้ง Ollama "
+                    "และโมเดลในเครื่อง"
+                )
         with gr.Tab("System"):
             refresh = gr.Button("ตรวจสอบระบบ")
             status = gr.Textbox(label="สถานะระบบ", lines=20, interactive=False)

@@ -51,8 +51,9 @@ Install dependencies in a separate setup process. Do not disable privacy to
 work around an unknown model download. Gradio 5 may emit deprecation warnings
 about Gradio 6; this phase deliberately supports its verified 5.50 API.
 
-The TTS, ASR, and Local LLM tabs are future-phase placeholders. Enabling them in
-configuration does not activate inference during Phase 1.
+TTS and ASR require their separately documented local model caches. Local LLM
+requires an Ollama service and a locally installed configured model; none of these
+components pull a model during normal application startup.
 
 ## PyThaiASR / Typhoon ASR compatibility
 The Python package published on PyPI may lag behind the current GitHub repository. When a required API is missing, inspect the installed version first; then either install the current upstream repository in a dedicated environment or adapt to the verified API.
@@ -69,9 +70,15 @@ Use a backend/model that is verified with the currently installed PyThaiTTS rele
 First-run model downloads are setup-time network activity. After download, runtime should be tested with the internet disconnected.
 
 ## Local LLM issues
-- Ollama mode expects a local server only.
-- llama.cpp mode expects a local model file or local server.
-- In offline mode, reject remote base URLs.
+- Ollama mode accepts only `http(s)` loopback endpoints, normally
+  `http://127.0.0.1:11434`; remote URLs are rejected before a request is sent.
+- Run `ollama list` to check the configured model. If it is absent, deliberately
+  run `ollama pull <model>` or `python scripts/setup_llm_model.py` during setup.
+- If doctor reports the service unavailable, start the installed Ollama service and
+  rerun doctor. Doctor lists models but never loads one or generates text.
+- A connection timeout normally means the local model is too large for the machine
+  or the request is long. Choose a smaller installed model or lower `llm.max_tokens`.
+- `llama_cpp` is reserved for a future adapter; Phase 4 implements Ollama only.
 
 ## Audio format
 Normalize ASR input to a supported mono PCM format and sample rate in a temporary file when needed. Delete temporary files after inference unless debug mode is explicitly enabled.

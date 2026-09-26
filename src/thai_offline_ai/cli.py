@@ -19,6 +19,7 @@ from thai_offline_ai.evaluation import (
     load_domain_terms,
     load_manifest,
 )
+from thai_offline_ai.llm_types import ChatMessage
 from thai_offline_ai.runtime import prepare_runtime
 from thai_offline_ai.streaming import StreamingASRService
 
@@ -43,6 +44,10 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate.add_argument("manifest", help="UTF-8 CSV with sample_id, audio_path, and reference_text")
     evaluate.add_argument("--domain-lexicon", help="Optional YAML file containing a terms list")
     evaluate.add_argument("--limit", type=int, help="Evaluate only the first N manifest rows")
+    llm = sub.add_parser("llm", help="Send a local message to the configured Ollama model")
+    llm.add_argument("text", nargs="?", help="Message text")
+    llm.add_argument("--text", dest="text_option", help="Compatible alternative to positional text")
+    llm.add_argument("--system", help="Optional local system instruction")
     stream = sub.add_parser("stream-asr", help="Simulate local streaming ASR from a WAV file")
     stream.add_argument("audio", help="Path to a readable WAV file")
     stream.add_argument("--realtime", action="store_true", help="Feed chunks at their real duration")
@@ -65,10 +70,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         settings = load_settings(args.config)
         if args.command == "chat":
             raise WorkbenchError(
-                f"{args.command} is not configured in Phase 1; inference is reserved for a future phase. "
-                "Use the nlp command. No model was loaded."
+                "The legacy chat command is unavailable. Use: llm \"your local message\". "
+                "No model was loaded."
             )
-        if args.command in {"nlp", "tts"} and (args.text is None) == (args.text_option is None):
+        if args.command in {"nlp", "tts", "llm"} and (args.text is None) == (args.text_option is None):
             raise WorkbenchError('Provide text once: nlp "Thai text" or nlp --text "Thai text".')
         prepare_runtime(settings)
         if args.command == "asr":
@@ -107,6 +112,17 @@ def main(argv: Sequence[str] | None = None) -> int:
                     indent=2,
                 )
             )
+            return 0
+        if args.command == "llm":
+            from thai_offline_ai.adapters.llm import OllamaLocalLLM
+
+            prompt = args.text if args.text is not None else args.text_option
+            messages = [
+                ChatMessage("system", args.system or settings.llm.system_prompt),
+                ChatMessage("user", prompt),
+            ]
+            result = OllamaLocalLLM.from_config(settings.llm, settings.app.offline_runtime).chat(messages)
+            print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
             return 0
         if args.command == "stream-asr":
             import time

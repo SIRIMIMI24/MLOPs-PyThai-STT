@@ -10,11 +10,11 @@
 | 3.5 | Near real-time streaming ASR | Complete |
 | 3.6 | Multi-format and batch audio | Complete |
 | 3.7 | ASR evaluation and accuracy lab | Complete |
-| 3.8 | Synthetic speech generation and self-training | Not started |
-| 4 | Local LLM | Not started |
+| 4 | Local LLM | Current |
 | 5 | Speaker diarization | Not started |
 | 5.5 | Streaming ASR plus streaming diarization | Not started |
 | 6 | Local voice assistant | Not started |
+| 6.5 | Speech AI Continuous Improvement Lab: synthetic speech, pseudo-labeling, self-training, fine-tuning, experiment tracking, model promotion | Not started |
 | 7 | Conversation intelligence | Not started |
 
 ## Phase 3.7: real-human ASR evaluation
@@ -48,7 +48,7 @@ audio must never enter `validation_real` or `test_real`. Dataset manifests carry
 sample ID, split, source/provenance, consent status where applicable, transcript
 state, audio checksum, and dataset version.
 
-## Phase 3.8: local synthetic speech pipeline
+## Future Phase 6.5: local synthetic speech pipeline
 
 ```text
 approved text corpus -> local TTS adapter -> synthetic audio -> augmentation -> training manifest

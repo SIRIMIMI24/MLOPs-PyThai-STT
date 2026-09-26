@@ -1,12 +1,13 @@
 # Architecture
 
-## Phase 3.7 implementation boundary
+## Phase 4 implementation boundary
 
 Phase 3 exposes NLP, CPU-only TTS, and file-based CPU-only ASR through CLI and
 Gradio. Phase 3.5 adds a separate near-real-time streaming service, without
 changing `ASRResult` or the file adapter. Phase 3.6 adds a shared local audio boundary
 and sequential batch processor. Phase 3.7 adds an evaluation layer that consumes
-batch results and never alters inference. File ASR returns structured `ASRResult`
+batch results and never alters inference. Phase 4 adds a loopback-only Ollama
+intelligence boundary that does not consume ASR text implicitly. File ASR returns structured `ASRResult`
 and `SpeechSegment` values; speaker remains `None` until a future diarization phase. See
 [`ASR_FUTURE_ROADMAP.md`](ASR_FUTURE_ROADMAP.md) for the planned evaluation,
 synthetic-data, and controlled adaptation governance.
@@ -25,6 +26,8 @@ Shared supporting modules preserve the existing boundaries:
   the configured output root.
 - `evaluation.py`: manifest parsing, versioned normalization, CER/WER edit counts,
   error analysis, optional domain terms, grouped metrics, and local JSON/CSV reports.
+- `adapters/llm.py` and `llm_types.py`: structured local chat contracts and one
+  lazy Ollama `/api/chat` adapter; no cloud fallback or automatic model pull.
 
 CLI, UI, and doctor load the same settings. Relative paths use the working
 directory; explicit config paths must exist. `.env` is not automatically loaded.
@@ -100,14 +103,17 @@ class BatchASRProcessor:
 class ASREvaluator:
     def evaluate(self, records, *, dataset_id: str, domain_terms=()) -> EvaluationReport: ...
 
+class OllamaLocalLLM:
+    def chat(self, messages: list[ChatMessage]) -> LLMResult: ...
+
 class StreamingASRService:
     def start_session(self) -> str: ...
     def push_audio(self, session_id: str, samples, sample_rate: int) -> list[StreamingASREvent]: ...
     def finalize(self, session_id: str) -> list[StreamingASREvent]: ...
     def close_session(self, session_id: str) -> None: ...
 
-class LocalLLMAdapter:
-    def chat(self, message: str, system_prompt: str | None = None) -> str: ...
+class OllamaLocalLLM:
+    def chat(self, messages: Sequence[ChatMessage]) -> LLMResult: ...
 ```
 
 ## Configuration

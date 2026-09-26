@@ -11,7 +11,7 @@ nlp:
   word_engine: "newmm"
   sentence_engine: "crfcut"
 
-# Reserved for future phases. Phase 1 provides no optional inference actions.
+# Optional local inference components; enable only after explicit local model setup.
 tts:
   enabled: false
   backend: "pythaitts"
@@ -34,7 +34,9 @@ llm:
   enabled: false
   backend: "ollama"
   base_url: "http://127.0.0.1:11434"
-  model: "qwen3:4b"
+  # Ollama model name. Download only with the explicit setup command.
+  model: "scb10x/typhoon2.5-qwen3-4b:latest"
   model_path: null
   temperature: 0.2
   max_tokens: 512
+  system_prompt: "You are a helpful Thai-language local assistant."

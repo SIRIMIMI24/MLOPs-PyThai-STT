@@ -7,6 +7,7 @@ import pytest
 from thai_offline_ai.adapters.tts import TTSAdapter
 from thai_offline_ai.config import AppConfig, Settings
 from thai_offline_ai.errors import ConfigurationError
+from thai_offline_ai.llm_types import LLMResult
 from thai_offline_ai.ui import CONTENT_SECURITY_POLICY, build_app, launch_app
 
 
@@ -81,6 +82,31 @@ def test_batch_asr_ui_constructs_without_loading_model(tmp_path, monkeypatch):
     demo, _ = build_app(settings)
     try:
         assert any(c["props"].get("label") == "ผลลัพธ์แบบชุด" for c in demo.config["components"])
+    finally:
+        demo.close()
+
+
+def test_llm_ui_is_lazy_and_keeps_history_session_local(tmp_path, monkeypatch):
+    settings = Settings(app=AppConfig(output_dir=str(tmp_path)))
+    settings.llm.enabled = True
+
+    def unexpected_connection(self, messages):
+        raise AssertionError("Local LLM must not connect during UI construction")
+
+    monkeypatch.setattr("thai_offline_ai.adapters.llm.OllamaLocalLLM.chat", unexpected_connection)
+    demo, _ = build_app(settings)
+    try:
+        assert any(c["props"].get("label") == "Local Chat" for c in demo.config["components"])
+        fn = next(key for key, value in demo.fns.items() if value.api_name == "local_llm_chat")
+        monkeypatch.setattr(
+            "thai_offline_ai.adapters.llm.OllamaLocalLLM.chat",
+            lambda self, messages: LLMResult("คำตอบ", "ollama", self.model),
+        )
+        result = asyncio.run(demo.process_api(fn, inputs=["คำถาม", "system", []]))
+        assert result["data"][0][-1]["content"] == "คำตอบ"
+        clear = next(key for key, value in demo.fns.items() if value.api_name == "clear_local_llm")
+        cleared = asyncio.run(demo.process_api(clear, inputs=[]))
+        assert cleared["data"] == [[], "", "Cleared local chat history."]
     finally:
         demo.close()
 

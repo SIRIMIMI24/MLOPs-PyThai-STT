@@ -52,10 +52,11 @@ class LLMConfig:
     enabled: bool = False
     backend: str = "ollama"
     base_url: str = "http://127.0.0.1:11434"
-    model: str = "qwen3:4b"
+    model: str = "scb10x/typhoon2.5-qwen3-4b:latest"
     model_path: str | None = None
     temperature: float = 0.2
     max_tokens: int = 512
+    system_prompt: str = "You are a helpful Thai-language local assistant."
 
 
 @dataclass(slots=True)
@@ -97,6 +98,8 @@ ENV_FIELDS = {
     "THAI_AI_LLM_ENABLED": ("llm", "enabled"),
     "THAI_AI_LLM_BACKEND": ("llm", "backend"),
     "THAI_AI_LLM_BASE_URL": ("llm", "base_url"),
+    "THAI_AI_LLM_MODEL": ("llm", "model"),
+    "THAI_AI_LLM_SYSTEM_PROMPT": ("llm", "system_prompt"),
 }
 
 

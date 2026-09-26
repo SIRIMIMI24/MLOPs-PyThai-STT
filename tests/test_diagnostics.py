@@ -62,3 +62,17 @@ def test_enabling_tts_without_model_reports_warning(tmp_path):
     settings.tts.model_dir = str(tmp_path / "missing-model")
     checks = diagnostics.collect_diagnostics(settings, check_imports=False)
     assert any(c.status == "WARN" and c.name == "Component tts" for c in checks)
+
+
+def test_enabled_llm_reports_local_service_and_model_readiness(monkeypatch, tmp_path):
+    settings = Settings(app=AppConfig(output_dir=str(tmp_path)))
+    settings.llm.enabled = True
+    monkeypatch.setattr("thai_offline_ai.adapters.llm.OllamaLocalLLM.status", lambda self: (True, "ready"))
+    monkeypatch.setattr(
+        "thai_offline_ai.adapters.llm.OllamaLocalLLM.installed_models",
+        lambda self: [settings.llm.model],
+    )
+    checks = diagnostics.collect_diagnostics(settings, check_imports=False)
+    assert any(c.name == "Ollama service" and c.status == "OK" for c in checks)
+    assert any(c.name == "Ollama model" and c.status == "OK" for c in checks)
+    assert any(c.name == "LLM inference" and c.status == "SKIP" for c in checks)
