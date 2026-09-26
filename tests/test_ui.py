@@ -53,6 +53,23 @@ def test_tts_enabled_ui_does_not_load_model(tmp_path, monkeypatch):
         demo.close()
 
 
+def test_asr_live_ui_does_not_load_model(tmp_path, monkeypatch):
+    settings = Settings(app=AppConfig(output_dir=str(tmp_path)))
+    settings.asr.enabled = True
+
+    def unexpected_model_load(self):
+        raise AssertionError("ASR must not load during UI construction")
+
+    from thai_offline_ai.streaming import StreamingASRService
+
+    monkeypatch.setattr(StreamingASRService, "_load_model", unexpected_model_load)
+    demo, _ = build_app(settings)
+    try:
+        assert any(c["props"].get("label") == "ไมโครโฟน (Live)" for c in demo.config["components"])
+    finally:
+        demo.close()
+
+
 def test_public_bind_rejected_before_gradio_construction(tmp_path):
     with pytest.raises(ConfigurationError, match="app.host"):
         build_app(Settings(app=AppConfig(host="0.0.0.0", output_dir=str(tmp_path))))

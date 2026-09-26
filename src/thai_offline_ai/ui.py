@@ -9,6 +9,7 @@ from thai_offline_ai.adapters.tts import TTSAdapter
 from thai_offline_ai.config import Settings, load_settings
 from thai_offline_ai.errors import WorkbenchError
 from thai_offline_ai.runtime import prepare_runtime
+from thai_offline_ai.streaming import StreamingASRService
 
 if TYPE_CHECKING:
     import gradio as gr
@@ -62,6 +63,7 @@ def build_app(settings: Settings | None = None) -> tuple[gr.Blocks, Settings]:
     adapter = NLPAdapter.from_config(settings.nlp, settings.app.offline_runtime)
     tts_adapter = TTSAdapter.from_settings(settings)
     asr_adapter = ASRAdapter(settings)
+    streaming_service = StreamingASRService(settings)
 
     def analyze(text: str) -> tuple[str, list[str], list[str], int]:
         try:
@@ -96,6 +98,40 @@ def build_app(settings: Settings | None = None) -> tuple[gr.Blocks, Settings]:
                 raise WorkbenchError("เลือกไฟล์ WAV ก่อนถอดเสียง")
             result = asr_adapter.transcribe_file(audio)
             return result.text, [segment.to_dict() for segment in result.segments], f"Duration: {result.duration:.2f}s · {result.backend} · {result.model}"
+        except WorkbenchError as exc:
+            raise gr.Error(str(exc)) from None
+
+    def start_live_session() -> tuple[str, str, str, str]:
+        try:
+            session_id = streaming_service.start_session()
+            return session_id, "", "", "กำลังรอเสียงจากไมโครโฟน (16 kHz จะถูกแปลงอัตโนมัติ)"
+        except WorkbenchError as exc:
+            raise gr.Error(str(exc)) from None
+
+    def process_live_chunk(
+        audio: tuple[int, Any] | None, session_id: str | None
+    ) -> tuple[str, str, str, str]:
+        try:
+            if not audio:
+                return session_id or "", "", "", "ยังไม่ได้รับช่วงเสียง"
+            active_session = session_id or streaming_service.start_session()
+            sample_rate, samples = audio
+            streaming_service.push_audio(active_session, samples, int(sample_rate))
+            events = streaming_service.get_events(active_session)
+            final_text = "".join(event.text for event in events)
+            return active_session, "", final_text, f"รับแล้ว {len(events)} ส่วนที่ยืนยันแล้ว"
+        except WorkbenchError as exc:
+            raise gr.Error(str(exc)) from None
+
+    def stop_live_session(session_id: str | None) -> tuple[str, str, str, str]:
+        try:
+            if not session_id:
+                return "", "", "", "ยังไม่มี Live session"
+            streaming_service.finalize(session_id)
+            events = streaming_service.get_events(session_id)
+            final_text = "".join(event.text for event in events)
+            streaming_service.close_session(session_id)
+            return "", "", final_text, "สิ้นสุด session แล้ว"
         except WorkbenchError as exc:
             raise gr.Error(str(exc)) from None
 
@@ -158,6 +194,34 @@ def build_app(settings: Settings | None = None) -> tuple[gr.Blocks, Settings]:
             asr_segments = gr.JSON(label="ส่วนของเสียง (Segments)")
             asr_info = gr.Textbox(label="ข้อมูล", interactive=False)
             asr_button.click(transcribe, asr_audio, [asr_text, asr_segments, asr_info], api_name="transcribe")
+            gr.Markdown(
+                "### Near Real-Time / Live (Phase 3.5)\n"
+                "เริ่ม session แล้วพูดผ่านไมโครโฟน ผลที่ถอดได้เป็นส่วนที่ยืนยันแล้ว; "
+                "PyThaiASR รุ่นนี้ไม่ส่ง hypothesis ที่แก้ไขย้อนหลังได้"
+            )
+            live_session = gr.State("")
+            live_start = gr.Button("เริ่ม Live transcription", interactive=settings.asr.enabled)
+            live_audio = gr.Audio(
+                label="ไมโครโฟน (Live)", type="numpy", sources=["microphone"],
+                streaming=True, interactive=settings.asr.enabled,
+            )
+            live_stop = gr.Button("หยุดและสรุปผล", interactive=settings.asr.enabled)
+            live_partial = gr.Textbox(label="Partial hypothesis", interactive=False)
+            live_final = gr.Textbox(label="ข้อความที่ยืนยันแล้ว", lines=5, interactive=False)
+            live_info = gr.Textbox(label="สถานะ Live", interactive=False)
+            live_start.click(
+                start_live_session, outputs=[live_session, live_partial, live_final, live_info],
+                api_name="start_live_asr",
+            )
+            live_audio.stream(
+                process_live_chunk, [live_audio, live_session],
+                [live_session, live_partial, live_final, live_info], api_name="live_asr_chunk",
+                concurrency_limit=1,
+            )
+            live_stop.click(
+                stop_live_session, live_session, [live_session, live_partial, live_final, live_info],
+                api_name="stop_live_asr",
+            )
         for title in ("Local LLM",):
             with gr.Tab(title):
                 gr.Markdown(f"## {title}\nยังไม่พร้อมใช้งาน — สงวนไว้สำหรับระยะถัดไป (Future phase)")

@@ -26,6 +26,8 @@ asr:
   model: "typhoon_asr"
   device: "cpu"
   sampling_rate: 16000
+  # Decoder window for optional Phase 3.5 near-real-time ASR sessions.
+  stream_chunk_seconds: 1.0
   model_dir: "models/pythaiasr"
 
 llm:

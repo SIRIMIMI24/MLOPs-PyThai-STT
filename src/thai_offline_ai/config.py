@@ -43,6 +43,7 @@ class ASRConfig:
     model: str | None = "typhoon_asr"
     device: str = "cpu"
     sampling_rate: int = 16000
+    stream_chunk_seconds: float = 1.0
     model_dir: str = "models/pythaiasr"
 
 
@@ -154,6 +155,8 @@ def validate_settings(settings: Settings) -> Settings:
         raise ConfigurationError("asr.device must be cpu, cuda, or auto; Phase 1 uses no ASR.")
     if settings.asr.sampling_rate <= 0:
         raise ConfigurationError("asr.sampling_rate must be positive.")
+    if not 0.25 <= settings.asr.stream_chunk_seconds <= 3.0:
+        raise ConfigurationError("asr.stream_chunk_seconds must be from 0.25 to 3.0 seconds.")
     if settings.tts.model != "lunarlist_onnx":
         raise ConfigurationError(
             "tts.model must be lunarlist_onnx. It is the verified CPU/ONNX backend for Phase 2."

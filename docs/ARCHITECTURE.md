@@ -1,10 +1,11 @@
 # Architecture
 
-## Phase 3 implementation boundary
+## Phase 3.5 implementation boundary
 
 Phase 3 exposes NLP, CPU-only TTS, and file-based CPU-only ASR through CLI and
-Gradio. ASR returns structured `ASRResult` and `SpeechSegment` values; speaker
-remains `None` until a future diarization phase. See
+Gradio. Phase 3.5 adds a separate near-real-time streaming service, without
+changing `ASRResult` or the file adapter. File ASR returns structured `ASRResult`
+and `SpeechSegment` values; speaker remains `None` until a future diarization phase. See
 [`ASR_FUTURE_ROADMAP.md`](ASR_FUTURE_ROADMAP.md) for the planned evaluation,
 synthetic-data, and controlled adaptation governance.
 
@@ -14,6 +15,8 @@ Shared supporting modules preserve the existing boundaries:
 - `runtime.py`: validated output creation and shared runtime preparation.
 - `diagnostics.py`: core import checks, bundled NLP smoke test, optional metadata checks.
 - `errors.py`: actionable errors that avoid echoing private model inputs.
+- `streaming.py`: session-specific PyThaiASR `RealtimeStreamASR` decoders and
+  JSON-serializable `StreamingASREvent` updates.
 
 CLI, UI, and doctor load the same settings. Relative paths use the working
 directory; explicit config paths must exist. `.env` is not automatically loaded.
@@ -83,6 +86,12 @@ class TTSAdapter:
 class ASRAdapter:
     def transcribe_file(self, audio_path: str) -> ASRResult: ...
 
+class StreamingASRService:
+    def start_session(self) -> str: ...
+    def push_audio(self, session_id: str, samples, sample_rate: int) -> list[StreamingASREvent]: ...
+    def finalize(self, session_id: str) -> list[StreamingASREvent]: ...
+    def close_session(self, session_id: str) -> None: ...
+
 class LocalLLMAdapter:
     def chat(self, message: str, system_prompt: str | None = None) -> str: ...
 ```
@@ -103,3 +112,26 @@ Important fields:
 
 ## Separate-ASR-service fallback
 If a desired ASR backend has Python or OS dependency conflicts, do not contaminate the main environment. Run that backend in a second local environment/service and call it through localhost. This preserves the offline/privacy requirement while keeping the main app maintainable.
+
+## Streaming boundary
+
+PyThaiASR 2.2.0's public `stream_asr()` is an optional microphone capture helper;
+it uses PyAudio and instantiates `RealtimeStreamASR`. The workbench uses the same
+verified lower-level decoder directly so browser chunks and deterministic WAV
+simulation share one service and do not require microphone hardware in tests.
+The canonical stream input is mono 16 kHz float PCM. Other rates are actually
+resampled and stereo is mixed to mono at the service boundary.
+
+Each session owns a decoder and a bounded 256-event history. PyThaiASR maintains a
+bounded rolling audio context itself; the workbench does not accumulate raw chunks.
+The model is lazy-loaded at the first pushed chunk, cached for future sessions, and
+serialised for inference because shared-model thread safety is undocumented.
+
+`StreamingASREvent` has `session_id`, ordered `sequence`, `text`, `is_final`,
+optional `start`, `end`, `speaker`, `confidence`, and metadata. The verified
+decoder emits stable newly decoded fragments, not revisable partial hypotheses, so
+Phase 3.5 records every emitted fragment as final and uses `finalize()` solely to
+flush trailing context. No timestamps, confidence, or speaker identity are invented.
+Future VAD can determine endpoints; Phase 5.5 can populate the existing speaker
+field without changing the event schema. Future evaluation can retain raw events
+for the same CER/WER/RTF workflow defined in the ASR roadmap.

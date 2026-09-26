@@ -1,12 +1,12 @@
-# Thai Offline AI Workbench — Phase 3
+# Thai Offline AI Workbench — Phase 3.5
 
 A local, CPU-first Thai NLP application using **PyThaiNLP** and **Gradio**.
-Phase 2 supports Thai normalization, word and sentence tokenization, token counts,
-Thai/Latin character counts, and local Thai TTS through PyThaiTTS Lunarlist ONNX.
-and file-based local Thai ASR. Local LLM remains a future phase.
+The workbench supports Thai normalization, word and sentence tokenization, local
+Thai TTS through PyThaiTTS Lunarlist ONNX, file ASR, and near-real-time local ASR.
+Local LLM remains a future phase.
 
-TTS, ASR, LLM inference, and microphone input are reserved for later phases.
-No GPU, NVIDIA/CUDA, WSL, Docker, API key, or separately downloaded model is needed.
+No GPU, NVIDIA/CUDA, WSL, Docker, or API key is required. TTS and ASR models are
+separate explicit setup downloads; normal runtime is cache-only.
 Python **3.10 (64-bit)** is the primary supported version.
 
 ## Windows: fresh folder to working NLP UI
@@ -122,7 +122,37 @@ speaker and confidence remain `null` until a future diarization phase.
 The browser upload workflow was manually verified with a local WAV and real
 PyThaiASR transcription. Direct arbitrary local-path HTTP injection is intentionally
 rejected by Gradio's upload-cache security policy; this does not affect normal browser
-uploads. Phase 3 is file-based only: streaming and diarization are not implemented.
+uploads. Phase 3 is file-based; Phase 3.5 adds a separate streaming path and does
+not add diarization.
+
+## Phase 3.5: near-real-time streaming ASR
+
+Phase 3.5 keeps file transcription unchanged and adds a session-scoped live path
+through the same local Typhoon CPU model. Gradio's **Live** controls accept microphone
+chunks, normalize each chunk to mono 16 kHz PCM, and create a model only when the
+first chunk arrives. A live session owns its decoder state and a bounded history of
+256 events; the cached model is read-only and shared serially because PyThaiASR does
+not document concurrent ONNX inference safety.
+
+PyThaiASR 2.2.0's `RealtimeStreamASR` emits newly decoded text fragments rather than
+revisable partial hypotheses. Each displayed fragment is therefore a finalized
+incremental transcript segment, and **Stop** flushes only the remaining decoder
+context. The UI labels its partial field accordingly and never repeatedly appends a
+changing hypothesis. This is near-real-time CPU transcription, not a claim of hard
+real-time latency; the simulator reports elapsed time for each actual machine.
+
+Test the streaming core without microphone hardware by simulating a local WAV in
+one-second chunks. Add `--realtime` to feed the chunks at their source duration:
+
+```powershell
+.\.venv\Scripts\python.exe -m thai_offline_ai.cli stream-asr outputs\tts\your-file.wav --realtime
+.\.venv\Scripts\python.exe scripts\stream_asr_wav.py outputs\tts\your-file.wav --realtime
+```
+
+These commands and live inference use only the completed local ASR cache. They do
+not fetch models or call cloud ASR services. Future VAD may replace controlled
+chunking, and Phase 5.5 may add speaker attribution; Phase 3.5 events already carry
+`speaker: null` and `confidence: null` unless a future verified backend supplies them.
 
 ## CLI and configuration
 
@@ -134,9 +164,8 @@ The original `--text` syntax remains supported:
 .\.venv\Scripts\python.exe -m thai_offline_ai.cli doctor
 ```
 
-NLP prints indented JSON with readable Thai text. The existing `tts`, `asr`, and
-`chat` command syntax is retained, but returns an actionable Phase 1 message and
-exit code 2 without invoking a model.
+NLP, TTS, file ASR, and streaming-simulation commands print readable JSON. `chat`
+remains reserved for a future local-LLM phase.
 
 Configuration order: **defaults → YAML → environment variables**.
 `config/settings.yaml` is optional; an explicitly supplied `--config` or
@@ -185,8 +214,9 @@ in this project's core installation. No PyThaiNLP `full` extra is needed.
   enforced. The supported NLP engines use installed resources only.
 - System fonts avoid remote font requests. Browser response headers restrict
   scripts, styles, fonts, and connections to the local application.
-- Input text is not written to application logs or files. Gradio temporary
-  storage is configured below the output directory; no upload/microphone UI is offered.
+- Input text is not written to application logs or files. Gradio temporary storage
+  is configured below the output directory; audio uploads and microphone chunks are
+  processed locally under the same loopback-only UI policy.
 
 These safeguards apply to the application process, not pip or setup commands.
 The Python socket guard is **not an OS firewall** and cannot police arbitrary

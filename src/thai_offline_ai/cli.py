@@ -12,6 +12,7 @@ from thai_offline_ai.adapters.tts import TTSAdapter
 from thai_offline_ai.config import load_settings
 from thai_offline_ai.errors import WorkbenchError
 from thai_offline_ai.runtime import prepare_runtime
+from thai_offline_ai.streaming import StreamingASRService
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -27,6 +28,9 @@ def build_parser() -> argparse.ArgumentParser:
     asr = sub.add_parser("asr", help="Transcribe a local WAV file")
     asr.add_argument("audio", nargs="?")
     asr.add_argument("--audio", dest="audio_option")
+    stream = sub.add_parser("stream-asr", help="Simulate local streaming ASR from a WAV file")
+    stream.add_argument("audio", help="Path to a readable WAV file")
+    stream.add_argument("--realtime", action="store_true", help="Feed chunks at their real duration")
     chat = sub.add_parser("chat", help="Reserved for a future phase")
     chat.add_argument("--message", required=True)
     chat.add_argument("--system")
@@ -56,6 +60,31 @@ def main(argv: Sequence[str] | None = None) -> int:
             if (args.audio is None) == (args.audio_option is None):
                 raise WorkbenchError("Provide one WAV path: asr audio.wav or asr --audio audio.wav.")
             print(json.dumps(ASRAdapter(settings).transcribe_file(args.audio or args.audio_option).to_dict(), ensure_ascii=False, indent=2))
+            return 0
+        if args.command == "stream-asr":
+            import time
+
+            import soundfile as sf
+
+            samples, sample_rate = sf.read(args.audio, always_2d=True, dtype="float32")
+            if samples.size == 0 or sample_rate <= 0:
+                raise WorkbenchError("Streaming input must be a non-empty readable WAV file.")
+            service = StreamingASRService(settings)
+            session_id = service.start_session()
+            chunk_samples = max(1, round(sample_rate * settings.asr.stream_chunk_seconds))
+            began = time.perf_counter()
+            try:
+                for offset in range(0, len(samples), chunk_samples):
+                    chunk = samples[offset : offset + chunk_samples]
+                    for event in service.push_audio(session_id, chunk, sample_rate):
+                        print(json.dumps(event.to_dict(), ensure_ascii=False))
+                    if args.realtime:
+                        time.sleep(len(chunk) / sample_rate)
+                for event in service.finalize(session_id):
+                    print(json.dumps(event.to_dict(), ensure_ascii=False))
+            finally:
+                service.close_session(session_id)
+            print(json.dumps({"elapsed_seconds": round(time.perf_counter() - began, 3)}, ensure_ascii=False))
             return 0
         if args.command == "tts":
             result = TTSAdapter.from_settings(settings).synthesize(
