@@ -95,6 +95,10 @@ def test_local_redirect_cannot_send_request_to_external_host():
         def do_POST(self):
             self.send_response(307)
             self.send_header("Location", "https://example.com/inference")
+            # Make the local redirect response self-delimiting on Windows so
+            # HTTPX reaches the guarded redirect connection deterministically.
+            self.send_header("Content-Length", "0")
+            self.send_header("Connection", "close")
             self.end_headers()
 
         def log_message(self, *args):

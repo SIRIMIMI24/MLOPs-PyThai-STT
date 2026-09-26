@@ -157,8 +157,26 @@ resampled and stereo is mixed to mono at the service boundary.
 
 Each session owns a decoder and a bounded 256-event history. PyThaiASR maintains a
 bounded rolling audio context itself; the workbench does not accumulate raw chunks.
-The model is lazy-loaded at the first pushed chunk, cached for future sessions, and
-serialised for inference because shared-model thread safety is undocumented.
+An explicit user **Start** creates the local session, loads the cached model, and
+creates the decoder before the UI enables microphone capture. The first 0.75 seconds
+of accepted session audio are held in a bounded session-local startup buffer and then
+drained in order; a short final buffer is flushed on Stop. This preserves initial,
+irregular browser chunks without retaining raw microphone audio for the lifetime of a
+session. The model remains lazy at application startup, is cached for future sessions,
+and is serialised for inference because shared-model thread safety is undocumented.
+
+The live state transition is **Preparing** -> **Ready / Listening** -> **Stopped**.
+PyThaiASR exposes energy-based silence gating, so this service explicitly sets its
+verified `silence_threshold=0.0`: accepted startup audio is not silently omitted for
+being low energy. Phase 3.5 adds no workbench VAD, silence policy, or endpoint
+detector; those remain future work. The canonical captured stream is the single
+preserved mono 16 kHz PCM sequence that Phase 5.5 may later fan out to ASR and
+diarization, rather than taking two browser microphone captures.
+
+Manual browser validation verified the ordinary two-step Start event, real microphone
+capture after Ready, retention of the first utterance after Ready, and repeated-session
+isolation. The system deliberately does not promise capture of speech before Ready:
+the microphone remains disabled while server-side session preparation runs.
 
 `StreamingASREvent` has `session_id`, ordered `sequence`, `text`, `is_final`,
 optional `start`, `end`, `speaker`, `confidence`, and metadata. The verified

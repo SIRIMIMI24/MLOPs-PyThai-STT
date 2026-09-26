@@ -157,12 +157,44 @@ def build_app(settings: Settings | None = None) -> tuple[gr.Blocks, Settings]:
         except WorkbenchError as exc:
             raise gr.Error(str(exc)) from None
 
-    def start_live_session() -> tuple[str, str, str, str]:
+    def begin_live_preparation():
+        """Render Preparing before the chained server-side setup action."""
+        return (
+            "",
+            "",
+            "",
+            "Preparing · กำลังเตรียมโมเดล ASR ในเครื่อง",
+            gr.update(value=None, interactive=False),
+            gr.update(interactive=False),
+            gr.update(interactive=False),
+        )
+
+    def start_live_session():
+        """Prepare local ASR before enabling browser microphone capture."""
         try:
             session_id = streaming_service.start_session()
-            return session_id, "", "", "Listening · รอเสียงจากไมโครโฟน (16 kHz จะถูกแปลงอัตโนมัติ)"
+            metrics = streaming_service.get_metrics(session_id)
+            preparation = metrics.model_initialization_seconds
+            preparation_text = f" · prepared in {preparation:.1f}s" if preparation else ""
+            return (
+                session_id,
+                "",
+                "",
+                "Ready / Listening · เริ่มพูดได้ (16 kHz จะถูกแปลงอัตโนมัติ)" + preparation_text,
+                gr.update(value=None, interactive=True),
+                gr.update(interactive=False),
+                gr.update(interactive=True),
+            )
         except WorkbenchError as exc:
-            raise gr.Error(str(exc)) from None
+            return (
+                "",
+                "",
+                "",
+                f"Preparation failed · {exc}",
+                gr.update(value=None, interactive=False),
+                gr.update(interactive=settings.asr.enabled),
+                gr.update(interactive=False),
+            )
 
     def process_live_chunk(
         audio: tuple[int, Any] | None, session_id: str | None
@@ -170,7 +202,9 @@ def build_app(settings: Settings | None = None) -> tuple[gr.Blocks, Settings]:
         try:
             if not audio:
                 return session_id or "", "", "", "ยังไม่ได้รับช่วงเสียง"
-            active_session = session_id or streaming_service.start_session()
+            if not session_id:
+                return "", "", "", "Preparing · รอให้ session พร้อมก่อนเริ่มไมโครโฟน"
+            active_session = session_id
             sample_rate, samples = audio
             streaming_service.push_audio(active_session, samples, int(sample_rate))
             events = streaming_service.get_events(active_session)
@@ -178,6 +212,12 @@ def build_app(settings: Settings | None = None) -> tuple[gr.Blocks, Settings]:
             final_text = "".join(event.text for event in events)
             latency = metrics.latest_chunk_latency_seconds
             latency_text = f"{latency * 1000:.0f} ms" if latency is not None else "n/a"
+            first_audio_latency = metrics.first_audio_to_decoder_seconds
+            first_audio_text = (
+                f" · first audio {first_audio_latency * 1000:.0f} ms"
+                if first_audio_latency is not None
+                else ""
+            )
             return (
                 active_session,
                 "",
@@ -185,16 +225,24 @@ def build_app(settings: Settings | None = None) -> tuple[gr.Blocks, Settings]:
                 (
                     "Processing complete · "
                     f"{metrics.finalized_events} finalized · latest {latency_text} · "
-                    f"session {metrics.session_duration_seconds:.1f}s"
+                    f"session {metrics.session_duration_seconds:.1f}s{first_audio_text}"
                 ),
             )
         except WorkbenchError as exc:
             raise gr.Error(str(exc)) from None
 
-    def stop_live_session(session_id: str | None) -> tuple[str, str, str, str]:
+    def stop_live_session(session_id: str | None):
         try:
             if not session_id:
-                return "", "", "", "ยังไม่มี Live session"
+                return (
+                    "",
+                    "",
+                    "",
+                    "ยังไม่มี Live session",
+                    gr.update(value=None, interactive=False),
+                    gr.update(interactive=settings.asr.enabled),
+                    gr.update(interactive=False),
+                )
             streaming_service.finalize(session_id)
             events = streaming_service.get_events(session_id)
             metrics = streaming_service.get_metrics(session_id)
@@ -206,6 +254,9 @@ def build_app(settings: Settings | None = None) -> tuple[gr.Blocks, Settings]:
                 "",
                 final_text,
                 f"Stopped · {metrics.finalized_events} finalized · session RTF {rtf_text}",
+                gr.update(value=None, interactive=False),
+                gr.update(interactive=settings.asr.enabled),
+                gr.update(interactive=False),
             )
         except WorkbenchError as exc:
             raise gr.Error(str(exc)) from None
@@ -369,14 +420,36 @@ def build_app(settings: Settings | None = None) -> tuple[gr.Blocks, Settings]:
             live_start = gr.Button("เริ่ม Live transcription", interactive=settings.asr.enabled)
             live_audio = gr.Audio(
                 label="ไมโครโฟน (Live)", type="numpy", sources=["microphone"],
-                streaming=True, interactive=settings.asr.enabled,
+                streaming=True, interactive=False,
             )
-            live_stop = gr.Button("หยุดและสรุปผล", interactive=settings.asr.enabled)
+            live_stop = gr.Button("หยุดและสรุปผล", interactive=False)
             live_partial = gr.Textbox(label="Partial hypothesis", interactive=False)
             live_final = gr.Textbox(label="ข้อความที่ยืนยันแล้ว", lines=5, interactive=False)
             live_info = gr.Textbox(label="สถานะ Live", interactive=False)
+            start_outputs = [
+                live_session,
+                live_partial,
+                live_final,
+                live_info,
+                live_audio,
+                live_start,
+                live_stop,
+            ]
             live_start.click(
-                start_live_session, outputs=[live_session, live_partial, live_final, live_info],
+                begin_live_preparation,
+                outputs=start_outputs,
+                api_name="begin_live_preparation",
+            ).then(
+                start_live_session,
+                outputs=[
+                    live_session,
+                    live_partial,
+                    live_final,
+                    live_info,
+                    live_audio,
+                    live_start,
+                    live_stop,
+                ],
                 api_name="start_live_asr",
             )
             live_audio.stream(
@@ -385,7 +458,17 @@ def build_app(settings: Settings | None = None) -> tuple[gr.Blocks, Settings]:
                 concurrency_limit=1,
             )
             live_stop.click(
-                stop_live_session, live_session, [live_session, live_partial, live_final, live_info],
+                stop_live_session,
+                live_session,
+                [
+                    live_session,
+                    live_partial,
+                    live_final,
+                    live_info,
+                    live_audio,
+                    live_start,
+                    live_stop,
+                ],
                 api_name="stop_live_asr",
             )
         with gr.Tab("Local LLM"):

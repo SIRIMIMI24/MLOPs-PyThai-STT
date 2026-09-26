@@ -129,10 +129,28 @@ not add diarization.
 
 Phase 3.5 keeps file transcription unchanged and adds a session-scoped live path
 through the same local Typhoon CPU model. Gradio's **Live** controls accept microphone
-chunks, normalize each chunk to mono 16 kHz PCM, and create a model only when the
-first chunk arrives. A live session owns its decoder state and a bounded history of
-256 events; the cached model is read-only and shared serially because PyThaiASR does
-not document concurrent ONNX inference safety.
+chunks and normalize each chunk to mono 16 kHz PCM. **Start** first enters
+**Preparing**, loads the already-cached local model and creates the session decoder,
+then enables the browser microphone only at **Ready / Listening**. The service retains
+the first 0.75 seconds of accepted session audio in a bounded session-local startup
+buffer, drains it without discarding short or irregular first chunks, and flushes a
+short final startup buffer when **Stop** is selected. A live session owns its decoder
+state and a bounded history of 256 events; the cached model is read-only and shared
+serially because PyThaiASR does not document concurrent ONNX inference safety.
+
+This reliability boundary disables PyThaiASR's default energy gate for live sessions,
+so a quiet initial decoder window cannot be silently skipped. It does not add a
+workbench VAD or endpoint detector; a future explicit VAD can make that policy
+configurable. The streaming resampler performs actual mono/16 kHz conversion and
+keeps the first input sample; each accepted chunk remains session-local. The status
+line reports preparation and local first-audio/latest-chunk timing without sending
+audio or telemetry outside localhost.
+
+Manual browser validation verified the Start flow, **Preparing** -> **Ready /
+Listening**, real microphone capture, first-utterance retention after Ready, and
+repeated-session isolation. Audio spoken before **Ready / Listening** is not
+guaranteed to be captured: microphone capture is intentionally disabled while the
+server prepares the local decoder and model.
 
 PyThaiASR 2.2.0's `RealtimeStreamASR` emits newly decoded text fragments rather than
 revisable partial hypotheses. Each displayed fragment is therefore a finalized

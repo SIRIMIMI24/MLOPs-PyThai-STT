@@ -13,6 +13,12 @@ from thai_offline_ai.adapters.asr import model_is_available
 from thai_offline_ai.config import Settings
 from thai_offline_ai.errors import WorkbenchError
 
+# Startup audio is held only long enough to make the beginning of a browser
+# session deterministic.  The buffer is session-local and is drained as soon as
+# it reaches this amount (or when the user stops), so it cannot grow over a
+# long-running session.
+STARTUP_BUFFER_SECONDS = 0.75
+
 
 @dataclass(frozen=True, slots=True)
 class StreamingASREvent:
@@ -44,6 +50,10 @@ class StreamingSessionMetrics:
     session_rtf: float | None
     finalized_events: int
     latest_chunk_latency_seconds: float | None
+    model_initialization_seconds: float | None
+    first_audio_to_decoder_seconds: float | None
+    first_event_latency_seconds: float | None
+    startup_buffered_audio_seconds: float
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -55,7 +65,14 @@ class _Session:
     sequence: int = 0
     events: deque[StreamingASREvent] = field(default_factory=lambda: deque(maxlen=256))
     closed: bool = False
+    state: str = "preparing"
     started_at: float = field(default_factory=time.perf_counter)
+    model_ready_at: float | None = None
+    model_initialization_seconds: float | None = None
+    first_audio_received_at: float | None = None
+    first_decoder_input_at: float | None = None
+    first_event_emitted_at: float | None = None
+    startup_audio: Any | None = None
     audio_seconds_processed: float = 0.0
     inference_seconds: float = 0.0
     latest_chunk_latency_seconds: float | None = None
@@ -109,10 +126,29 @@ class StreamingASRService:
         return self._model
 
     def start_session(self) -> str:
-        """Create isolated decoder state without loading a model until it is needed."""
+        """Prepare an isolated decoder before browser capture is enabled.
+
+        Starting a session is an explicit user action, so loading the cached
+        local model here preserves normal application startup laziness while
+        avoiding a race in which the first microphone chunk waits for model
+        initialisation.
+        """
         session_id = uuid4().hex
+        session = _Session(decoder=None)
         with self._sessions_lock:
-            self._sessions[session_id] = _Session(decoder=None)
+            self._sessions[session_id] = session
+        preparation_started_at = time.perf_counter()
+        try:
+            with session.lock:
+                self._decoder_for(session)
+                session.model_ready_at = time.perf_counter()
+                session.model_initialization_seconds = (
+                    session.model_ready_at - preparation_started_at
+                )
+                session.state = "listening"
+        except Exception:
+            self.close_session(session_id)
+            raise
         return session_id
 
     def _get_session(self, session_id: str) -> _Session:
@@ -131,6 +167,10 @@ class StreamingASRService:
                     model=self._load_model(),
                     sample_rate=self.settings.asr.sampling_rate,
                     step_sec=self.settings.asr.stream_chunk_seconds,
+                    # The upstream default energy gate can skip a quiet initial
+                    # decoder window. Preserve every accepted microphone sample;
+                    # future VAD can add explicit endpoint policy separately.
+                    silence_threshold=0.0,
                 )
             except WorkbenchError:
                 raise
@@ -187,47 +227,108 @@ class StreamingASRService:
             },
         )
         session.events.append(event)
+        if session.first_event_emitted_at is None:
+            session.first_event_emitted_at = time.perf_counter()
         return [event]
+
+    def _process_audio(
+        self,
+        session_id: str,
+        session: _Session,
+        audio: Any,
+        *,
+        received_at: float,
+        startup_buffered: bool,
+    ) -> list[StreamingASREvent]:
+        """Send already-normalised PCM to the prepared session decoder."""
+        audio_seconds = len(audio) / self.settings.asr.sampling_rate
+        decoder = self._decoder_for(session)
+        try:
+            # PyThaiASR's ONNX model is shared and its thread safety is not documented.
+            with self._inference_lock:
+                inference_started_at = time.perf_counter()
+                if session.first_decoder_input_at is None:
+                    session.first_decoder_input_at = inference_started_at
+                raw_pieces = decoder.process_chunk(audio)
+                inference_ended_at = time.perf_counter()
+        except Exception as exc:
+            raise WorkbenchError("Thai streaming ASR failed while processing audio.") from exc
+        pieces = [raw_pieces] if isinstance(raw_pieces, str) else raw_pieces
+        inference_seconds = inference_ended_at - inference_started_at
+        emitted_at = time.perf_counter()
+        session.audio_seconds_processed += audio_seconds
+        session.inference_seconds += inference_seconds
+        session.latest_chunk_latency_seconds = emitted_at - received_at
+        timing = {
+            "chunk_received_at_monotonic_s": received_at,
+            "inference_started_at_monotonic_s": inference_started_at,
+            "inference_ended_at_monotonic_s": inference_ended_at,
+            "event_emitted_at_monotonic_s": emitted_at,
+            "audio_seconds": audio_seconds,
+            "inference_seconds": inference_seconds,
+            "chunk_processing_latency_seconds": emitted_at - received_at,
+            "chunk_rtf": inference_seconds / audio_seconds,
+            "startup_buffered": startup_buffered,
+            "first_audio_to_decoder_seconds": (
+                inference_started_at - session.first_audio_received_at
+                if session.first_audio_received_at is not None
+                else None
+            ),
+        }
+        return [
+            event
+            for piece in pieces
+            for event in self._record(session_id, session, piece, is_final=True, timing=timing)
+        ]
 
     def push_audio(self, session_id: str, samples: Any, sample_rate: int) -> list[StreamingASREvent]:
         """Accept one audio chunk and return newly finalised incremental text."""
         session = self._get_session(session_id)
         received_at = time.perf_counter()
         audio = self._normalise_chunk(samples, sample_rate)
-        audio_seconds = len(audio) / self.settings.asr.sampling_rate
         with session.lock:
             if session.closed:
                 raise WorkbenchError("Streaming ASR session is already finalised.")
-            decoder = self._decoder_for(session)
-            try:
-                # PyThaiASR's ONNX model is shared and its thread safety is not documented.
-                with self._inference_lock:
-                    inference_started_at = time.perf_counter()
-                    raw_pieces = decoder.process_chunk(audio)
-                    inference_ended_at = time.perf_counter()
-            except Exception as exc:
-                raise WorkbenchError("Thai streaming ASR failed while processing audio.") from exc
-            pieces = [raw_pieces] if isinstance(raw_pieces, str) else raw_pieces
-            inference_seconds = inference_ended_at - inference_started_at
-            emitted_at = time.perf_counter()
-            session.audio_seconds_processed += audio_seconds
-            session.inference_seconds += inference_seconds
-            session.latest_chunk_latency_seconds = emitted_at - received_at
-            timing = {
-                "chunk_received_at_monotonic_s": received_at,
-                "inference_started_at_monotonic_s": inference_started_at,
-                "inference_ended_at_monotonic_s": inference_ended_at,
-                "event_emitted_at_monotonic_s": emitted_at,
-                "audio_seconds": audio_seconds,
-                "inference_seconds": inference_seconds,
-                "chunk_processing_latency_seconds": emitted_at - received_at,
-                "chunk_rtf": inference_seconds / audio_seconds,
-            }
-            return [
-                event
-                for piece in pieces
-                for event in self._record(session_id, session, piece, is_final=True, timing=timing)
-            ]
+            if session.first_audio_received_at is None:
+                session.first_audio_received_at = received_at
+            startup_limit = round(STARTUP_BUFFER_SECONDS * self.settings.asr.sampling_rate)
+            if session.startup_audio is not None or session.audio_seconds_processed == 0.0:
+                import numpy as np
+
+                buffered = (
+                    audio
+                    if session.startup_audio is None
+                    else np.concatenate((session.startup_audio, audio))
+                )
+                if len(buffered) < startup_limit:
+                    session.startup_audio = buffered
+                    return []
+                # Keep the retained start window bounded, then immediately pass
+                # every remaining sample through as well. No initial sample is
+                # discarded when a browser sends an irregular large chunk.
+                session.startup_audio = None
+                events = self._process_audio(
+                    session_id,
+                    session,
+                    buffered[:startup_limit],
+                    received_at=received_at,
+                    startup_buffered=True,
+                )
+                remainder = buffered[startup_limit:]
+                if len(remainder):
+                    events.extend(
+                        self._process_audio(
+                            session_id,
+                            session,
+                            remainder,
+                            received_at=received_at,
+                            startup_buffered=True,
+                        )
+                    )
+                return events
+            return self._process_audio(
+                session_id, session, audio, received_at=received_at, startup_buffered=False
+            )
 
     def get_events(self, session_id: str) -> list[StreamingASREvent]:
         session = self._get_session(session_id)
@@ -240,7 +341,7 @@ class StreamingASRService:
         with session.lock:
             return StreamingSessionMetrics(
                 session_id=session_id,
-                state="stopped" if session.closed else "listening",
+                state="stopped" if session.closed else session.state,
                 session_duration_seconds=time.perf_counter() - session.started_at,
                 audio_seconds_processed=session.audio_seconds_processed,
                 inference_seconds=session.inference_seconds,
@@ -249,6 +350,24 @@ class StreamingASRService:
                 else None,
                 finalized_events=len(session.events),
                 latest_chunk_latency_seconds=session.latest_chunk_latency_seconds,
+                model_initialization_seconds=session.model_initialization_seconds,
+                first_audio_to_decoder_seconds=(
+                    session.first_decoder_input_at - session.first_audio_received_at
+                    if session.first_decoder_input_at is not None
+                    and session.first_audio_received_at is not None
+                    else None
+                ),
+                first_event_latency_seconds=(
+                    session.first_event_emitted_at - session.first_audio_received_at
+                    if session.first_event_emitted_at is not None
+                    and session.first_audio_received_at is not None
+                    else None
+                ),
+                startup_buffered_audio_seconds=(
+                    len(session.startup_audio) / self.settings.asr.sampling_rate
+                    if session.startup_audio is not None
+                    else 0.0
+                ),
             )
 
     def finalize(self, session_id: str) -> list[StreamingASREvent]:
@@ -259,6 +378,17 @@ class StreamingASRService:
             if session.closed:
                 return []
             decoder = self._decoder_for(session)
+            buffered_events: list[StreamingASREvent] = []
+            if session.startup_audio is not None:
+                buffered = session.startup_audio
+                session.startup_audio = None
+                buffered_events = self._process_audio(
+                    session_id,
+                    session,
+                    buffered,
+                    received_at=session.first_audio_received_at or received_at,
+                    startup_buffered=True,
+                )
             try:
                 with self._inference_lock:
                     inference_started_at = time.perf_counter()
@@ -270,7 +400,7 @@ class StreamingASRService:
             inference_seconds = inference_ended_at - inference_started_at
             session.inference_seconds += inference_seconds
             emitted_at = time.perf_counter()
-            return self._record(
+            return buffered_events + self._record(
                 session_id,
                 session,
                 text,

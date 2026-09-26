@@ -1,5 +1,6 @@
 import asyncio
 import socket
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -67,6 +68,39 @@ def test_asr_live_ui_does_not_load_model(tmp_path, monkeypatch):
     demo, _ = build_app(settings)
     try:
         assert any(c["props"].get("label") == "ไมโครโฟน (Live)" for c in demo.config["components"])
+    finally:
+        demo.close()
+
+
+def test_live_start_callback_uses_a_lightweight_ready_session_contract(tmp_path, monkeypatch):
+    settings = Settings(app=AppConfig(output_dir=str(tmp_path)))
+    settings.asr.enabled = True
+
+    from thai_offline_ai.streaming import StreamingASRService
+
+    monkeypatch.setattr(StreamingASRService, "start_session", lambda self: "live-session-1")
+    monkeypatch.setattr(
+        StreamingASRService,
+        "get_metrics",
+        lambda self, session_id: SimpleNamespace(model_initialization_seconds=0.25),
+    )
+    demo, _ = build_app(settings)
+    try:
+        fn = next(key for key, value in demo.fns.items() if value.api_name == "start_live_asr")
+        result = asyncio.run(demo.process_api(fn, inputs=[]))
+        assert result["is_generating"] is False
+        assert len(result["data"]) == 7
+        # State is deliberately not serialized to the browser; the service owns
+        # the decoder and receives only the lightweight session identifier.
+        assert result["data"][0] is None
+        assert result["data"][3].startswith("Ready / Listening")
+        assert result["data"][4]["interactive"] is True
+
+        dependency = next(item for item in demo.config["dependencies"] if item["api_name"] == "start_live_asr")
+        assert dependency["types"]["generator"] is False
+        assert len(dependency["outputs"]) == 7
+        output_components = {item["id"]: item for item in demo.config["components"]}
+        assert output_components[dependency["outputs"][0]]["type"] == "state"
     finally:
         demo.close()
 

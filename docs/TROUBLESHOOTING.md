@@ -95,3 +95,18 @@ First-run model downloads are setup-time network activity. After download, runti
 
 ## Audio format
 Normalize ASR input to a supported mono PCM format and sample rate in a temporary file when needed. Delete temporary files after inference unless debug mode is explicitly enabled.
+
+## Live ASR first utterance
+The Live microphone control remains disabled while its session is **Preparing** the
+already-installed local ASR model. Wait for **Ready / Listening** before speaking;
+the first accepted 0.75 seconds are held in a bounded local start buffer so short or
+irregular initial chunks are preserved. PyThaiASR's built-in energy gate is explicitly
+disabled for live sessions; Phase 3.5 otherwise has no VAD or endpoint detector. If a
+first word is still missing, record the status timing and test a new Start/Stop session
+before collecting a consented non-sensitive reproduction; do not upload microphone
+content to a remote debugging service.
+
+The browser Start, Ready transition, microphone capture after Ready, first-utterance
+retention, and repeated session isolation were manually verified. Speech made before
+the Ready state is outside the capture contract because the microphone is deliberately
+disabled during local model and decoder preparation.
