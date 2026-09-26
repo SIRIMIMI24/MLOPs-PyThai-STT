@@ -1,0 +1,2 @@
+sample_id,audio_path,reference_text,audio_condition,domain,source_format,notes
+example_001,audio/example_001.wav,ตัวอย่างข้อความภาษาไทย,clean,example,wav,Replace with verified real-human ground truth

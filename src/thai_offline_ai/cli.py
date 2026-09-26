@@ -5,6 +5,7 @@ import json
 import sys
 from collections.abc import Sequence
 from dataclasses import asdict
+from pathlib import Path
 
 from thai_offline_ai.adapters.asr import ASRAdapter
 from thai_offline_ai.adapters.nlp import NLPAdapter
@@ -12,6 +13,12 @@ from thai_offline_ai.adapters.tts import TTSAdapter
 from thai_offline_ai.batch import BatchASRProcessor, export_batch_result
 from thai_offline_ai.config import load_settings
 from thai_offline_ai.errors import WorkbenchError
+from thai_offline_ai.evaluation import (
+    ASREvaluator,
+    export_evaluation_report,
+    load_domain_terms,
+    load_manifest,
+)
 from thai_offline_ai.runtime import prepare_runtime
 from thai_offline_ai.streaming import StreamingASRService
 
@@ -32,6 +39,10 @@ def build_parser() -> argparse.ArgumentParser:
     batch = sub.add_parser("asr-batch", help="Transcribe supported audio files in a local folder")
     batch.add_argument("directory", help="Local folder containing WAV, FLAC, MP3, or OGG files")
     batch.add_argument("--recursive", action="store_true", help="Include supported audio in subfolders")
+    evaluate = sub.add_parser("evaluate-asr", help="Evaluate local ASR against a ground-truth CSV manifest")
+    evaluate.add_argument("manifest", help="UTF-8 CSV with sample_id, audio_path, and reference_text")
+    evaluate.add_argument("--domain-lexicon", help="Optional YAML file containing a terms list")
+    evaluate.add_argument("--limit", type=int, help="Evaluate only the first N manifest rows")
     stream = sub.add_parser("stream-asr", help="Simulate local streaming ASR from a WAV file")
     stream.add_argument("audio", help="Path to a readable WAV file")
     stream.add_argument("--realtime", action="store_true", help="Feed chunks at their real duration")
@@ -74,6 +85,24 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(
                 json.dumps(
                     {**result.to_dict(), "exports": {"json": str(json_path), "csv": str(csv_path)}},
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+            return 0
+        if args.command == "evaluate-asr":
+            if args.limit is not None and args.limit <= 0:
+                raise WorkbenchError("--limit must be a positive integer.")
+            records = load_manifest(args.manifest, limit=args.limit)
+            report = ASREvaluator(settings).evaluate(
+                records,
+                dataset_id=Path(args.manifest).stem,
+                domain_terms=load_domain_terms(args.domain_lexicon),
+            )
+            json_path, csv_path = export_evaluation_report(report, settings)
+            print(
+                json.dumps(
+                    {**report.to_dict(), "exports": {"json": str(json_path), "csv": str(csv_path)}},
                     ensure_ascii=False,
                     indent=2,
                 )

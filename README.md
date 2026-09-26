@@ -1,4 +1,4 @@
-# Thai Offline AI Workbench — Phase 3.6
+# Thai Offline AI Workbench — Phase 3.7
 
 A local, CPU-first Thai NLP application using **PyThaiNLP** and **Gradio**.
 The workbench supports Thai normalization, word and sentence tokenization, local
@@ -198,6 +198,34 @@ The ASR tab retains **Single File** and **Live Streaming** and adds **Batch File
 The batch table exposes file name, status, duration, processing time, RTF, transcript
 preview, and an error when one input cannot be processed. No model loads until a
 single-file, batch, or live request actually reaches ASR.
+
+## Phase 3.7: ASR Evaluation & Accuracy Lab
+
+The evaluation lab measures one current local ASR backend against verified ground
+truth from a UTF-8 CSV manifest. It does not train, fine-tune, select, or promote a
+model. The manifest requires `sample_id`, `audio_path`, and `reference_text`; optional
+columns such as `audio_condition`, `domain`, `source_format`, and `notes` are retained
+for breakdowns. See [the dataset contract](datasets/evaluation/README.md) and the
+tracked [example manifest](datasets/evaluation/manifest.example.csv).
+
+Evaluation retains raw reference and ASR text separately. Version `thai-asr-eval-v1`
+applies Unicode NFKC, PyThaiNLP normalization, whitespace collapse, and removal of
+common ASCII/typographic punctuation only; it never corrects words. CER compares
+normalized characters after removing spaces. Thai WER uses normalized text tokenized
+with `pythainlp:newmm`; do not compare WER reports produced with another tokenizer.
+Dataset CER/WER are calculated from the sum of substitutions, deletions, insertions,
+and reference units, not by averaging individual percentages.
+
+```powershell
+.\.venv\Scripts\python.exe -m thai_offline_ai.cli evaluate-asr C:\Evaluation\manifest.csv
+.\.venv\Scripts\python.exe -m thai_offline_ai.cli evaluate-asr C:\Evaluation\manifest.csv --domain-lexicon C:\Evaluation\domain_terms.yaml
+```
+
+Reports include sample raw/normalized texts, CER/WER edit counts, RTF, optional
+domain-term recall, metadata breakdowns, and common substitutions/deletions/insertions.
+They are written locally to `outputs\evaluation` as JSON and CSV. Synthetic TTS audio
+may validate the engineering path but must be labelled **SYNTHETIC ENGINEERING SMOKE
+TEST**; it is never evidence of real-human ASR accuracy or a claim such as “95% accuracy.”
 
 ## CLI and configuration
 

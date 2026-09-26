@@ -17,3 +17,6 @@ models/*
 *.mp3
 *.m4a
 *.flac
+datasets/evaluation/*
+!datasets/evaluation/README.md
+!datasets/evaluation/manifest.example.csv

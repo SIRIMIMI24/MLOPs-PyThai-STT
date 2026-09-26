@@ -1,11 +1,12 @@
 # Architecture
 
-## Phase 3.6 implementation boundary
+## Phase 3.7 implementation boundary
 
 Phase 3 exposes NLP, CPU-only TTS, and file-based CPU-only ASR through CLI and
 Gradio. Phase 3.5 adds a separate near-real-time streaming service, without
 changing `ASRResult` or the file adapter. Phase 3.6 adds a shared local audio boundary
-and sequential batch processor. File ASR returns structured `ASRResult`
+and sequential batch processor. Phase 3.7 adds an evaluation layer that consumes
+batch results and never alters inference. File ASR returns structured `ASRResult`
 and `SpeechSegment` values; speaker remains `None` until a future diarization phase. See
 [`ASR_FUTURE_ROADMAP.md`](ASR_FUTURE_ROADMAP.md) for the planned evaluation,
 synthetic-data, and controlled adaptation governance.
@@ -22,6 +23,8 @@ Shared supporting modules preserve the existing boundaries:
   polyphase resampling, metadata preservation, and safe temporary WAV output.
 - `batch.py`: sequential, failure-isolated ASR jobs with JSON/CSV exports below
   the configured output root.
+- `evaluation.py`: manifest parsing, versioned normalization, CER/WER edit counts,
+  error analysis, optional domain terms, grouped metrics, and local JSON/CSV reports.
 
 CLI, UI, and doctor load the same settings. Relative paths use the working
 directory; explicit config paths must exist. `.env` is not automatically loaded.
@@ -93,6 +96,9 @@ class ASRAdapter:
 
 class BatchASRProcessor:
     def transcribe_paths(self, paths) -> BatchASRResult: ...
+
+class ASREvaluator:
+    def evaluate(self, records, *, dataset_id: str, domain_terms=()) -> EvaluationReport: ...
 
 class StreamingASRService:
     def start_session(self) -> str: ...

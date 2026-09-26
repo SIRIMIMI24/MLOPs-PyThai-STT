@@ -7,9 +7,9 @@
 | 1 | PyThaiNLP | Complete |
 | 2 | Thai TTS | Complete |
 | 3 | File-based Thai ASR | Complete |
-| 3.5 | Near real-time streaming ASR | Not started |
-| 3.6 | Multi-format and batch audio | Not started |
-| 3.7 | ASR evaluation and accuracy lab | Not started |
+| 3.5 | Near real-time streaming ASR | Complete |
+| 3.6 | Multi-format and batch audio | Complete |
+| 3.7 | ASR evaluation and accuracy lab | Complete |
 | 3.8 | Synthetic speech generation and self-training | Not started |
 | 4 | Local LLM | Not started |
 | 5 | Speaker diarization | Not started |
