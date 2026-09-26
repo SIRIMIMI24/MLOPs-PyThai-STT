@@ -83,7 +83,7 @@ def collect_diagnostics(
         ),
         ("gradio", "gradio", True),
         ("PyThaiTTS", "pythaitts", settings.tts.enabled),
-        ("pythaiasr", "pythaiasr", False),
+        ("pythaiasr", "pythaiasr", settings.asr.enabled or settings.diarization.enabled),
         ("scipy", "scipy", settings.asr.enabled),
         ("onnxruntime", "onnxruntime", settings.tts.enabled),
         ("onnxruntime-gpu", "onnxruntime", False),
@@ -152,6 +152,41 @@ def collect_diagnostics(
         except WorkbenchError as exc:
             results.append(Check("WARN", "Ollama service", str(exc)))
         results.append(Check("SKIP", "LLM inference", "model intentionally not loaded by doctor."))
+    if settings.diarization.enabled:
+        from thai_offline_ai.adapters.diarization import (
+            cuda_is_usable,
+            nvidia_gpu_summary,
+            resolve_device,
+        )
+        from thai_offline_ai.adapters.diarization import (
+            model_is_available as diarization_model_available,
+        )
+
+        ready = diarization_model_available(
+            settings.diarization.model_dir, settings.diarization.precision
+        )
+        results.append(
+            Check(
+                "OK" if ready else "WARN",
+                "Diarization model cache",
+                f"{settings.diarization.model_dir}; "
+                + ("required ONNX files found." if ready else "missing; run python scripts/setup_diarization_model.py."),
+            )
+        )
+        results.append(
+            Check(
+                "OK" if cuda_is_usable() else "SKIP",
+                "Diarization CUDA",
+                "ONNX Runtime CUDA provider available." if cuda_is_usable() else "CPU fallback selected; CUDA provider unavailable.",
+            )
+        )
+        gpu = nvidia_gpu_summary()
+        if gpu:
+            results.append(Check("OK", "NVIDIA GPU", gpu))
+        results.append(
+            Check("OK", "Diarization device", f"{resolve_device(settings.diarization.device)} selected.")
+        )
+        results.append(Check("SKIP", "Diarization inference", "model intentionally not loaded by doctor."))
     if settings.nlp.enabled and check_imports and not any(c.status == "FAIL" for c in results):
         try:
             from thai_offline_ai.adapters.nlp import NLPAdapter
@@ -177,7 +212,7 @@ def collect_diagnostics(
         Check("OK", "UI bind", f"{settings.app.host}:{settings.app.port}; sharing disabled.")
     )
     results.append(Check("OK", "Log level", settings.app.log_level))
-    for name in ("nlp", "tts", "asr", "llm"):
+    for name in ("nlp", "tts", "asr", "llm", "diarization"):
         component = getattr(settings, name)
         if name == "tts" and component.enabled:
             from thai_offline_ai.adapters.tts import model_is_available
@@ -189,6 +224,12 @@ def collect_diagnostics(
             status = "OK" if component.enabled else "SKIP"
         elif name == "llm" and component.enabled:
             status = "OK"
+        elif name == "diarization" and component.enabled:
+            from thai_offline_ai.adapters.diarization import (
+                model_is_available as diarization_model_available,
+            )
+
+            status = "OK" if diarization_model_available(component.model_dir, component.precision) else "WARN"
         else:
             status = "WARN" if component.enabled else "SKIP"
         detail = f"enabled={component.enabled}; backend={component.backend}"
@@ -199,6 +240,8 @@ def collect_diagnostics(
                 "; Phase 3 cache ready." if name == "asr" and status == "OK" else
                 "; run python scripts/setup_asr_model.py." if name == "asr" and component.enabled else
                 "; Local Ollama configured; doctor does not run inference." if name == "llm" and component.enabled else
+                "; Phase 5 cache ready; doctor does not run inference." if name == "diarization" and status == "OK" else
+                "; run python scripts/setup_diarization_model.py." if name == "diarization" and component.enabled else
                 "; future phase, inference unavailable even when enabled."
             )
         results.append(Check(status, f"Component {name}", detail))

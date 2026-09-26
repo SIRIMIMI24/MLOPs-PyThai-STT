@@ -10,8 +10,8 @@
 | 3.5 | Near real-time streaming ASR | Complete |
 | 3.6 | Multi-format and batch audio | Complete |
 | 3.7 | ASR evaluation and accuracy lab | Complete |
-| 4 | Local LLM | Current |
-| 5 | Speaker diarization | Not started |
+| 4 | Local LLM | Complete |
+| 5 | Speaker diarization | Complete |
 | 5.5 | Streaming ASR plus streaming diarization | Not started |
 | 6 | Local voice assistant | Not started |
 | 6.5 | Speech AI Continuous Improvement Lab: synthetic speech, pseudo-labeling, self-training, fine-tuning, experiment tracking, model promotion | Not started |

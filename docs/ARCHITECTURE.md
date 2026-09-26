@@ -1,14 +1,15 @@
 # Architecture
 
-## Phase 4 implementation boundary
+## Phase 5 implementation boundary
 
 Phase 3 exposes NLP, CPU-only TTS, and file-based CPU-only ASR through CLI and
 Gradio. Phase 3.5 adds a separate near-real-time streaming service, without
 changing `ASRResult` or the file adapter. Phase 3.6 adds a shared local audio boundary
 and sequential batch processor. Phase 3.7 adds an evaluation layer that consumes
 batch results and never alters inference. Phase 4 adds a loopback-only Ollama
-intelligence boundary that does not consume ASR text implicitly. File ASR returns structured `ASRResult`
-and `SpeechSegment` values; speaker remains `None` until a future diarization phase. See
+intelligence boundary that does not consume ASR text implicitly. Phase 5 adds an
+independent local diarization adapter and timestamp-only composition layer; raw ASR
+values remain unchanged. See
 [`ASR_FUTURE_ROADMAP.md`](ASR_FUTURE_ROADMAP.md) for the planned evaluation,
 synthetic-data, and controlled adaptation governance.
 
@@ -28,6 +29,10 @@ Shared supporting modules preserve the existing boundaries:
   error analysis, optional domain terms, grouped metrics, and local JSON/CSV reports.
 - `adapters/llm.py` and `llm_types.py`: structured local chat contracts and one
   lazy Ollama `/api/chat` adapter; no cloud fallback or automatic model pull.
+- `adapters/diarization.py` and `diarization_types.py`: lazy local PyThaiASR
+  Nemotron ONNX speaker turns with cache-only model readiness and CPU fallback.
+- `speaker_composition.py`: deterministic greatest-overlap attribution of existing
+  timestamped ASR segments, without altering `ASRResult`.
 
 CLI, UI, and doctor load the same settings. Relative paths use the working
 directory; explicit config paths must exist. `.env` is not automatically loaded.
@@ -59,6 +64,14 @@ does not claim to sandbox arbitrary native libraries or external programs.
         PyThaiNLP          PyThaiTTS           PyThaiASR
                                 │                  │
                                 └──── local CPU ───┘
+
+                       ┌─────────────────────┐
+                       │ DiarizationAdapter  │
+                       └──────────┬──────────┘
+                                  ▼
+                     SpeakerTurn / DiarizationResult
+                                  │
+                  ASRResult ─────┴─────> composition -> SpeakerAttributedTranscript
 
                        ┌────────────────┐
                        │   LLMAdapter   │
@@ -155,3 +168,17 @@ flush trailing context. No timestamps, confidence, or speaker identity are inven
 Future VAD can determine endpoints; Phase 5.5 can populate the existing speaker
 field without changing the event schema. Future evaluation can retain raw events
 for the same CER/WER/RTF workflow defined in the ASR roadmap.
+
+## Diarization alignment boundary
+
+`DiarizationAdapter.diarize_file()` produces chronological anonymous `SpeakerTurn`
+values. `compose_speaker_transcript()` combines those turns with an immutable
+`ASRResult` by selecting the greatest genuine timestamp overlap for each ASR
+segment. Ties use earliest turn then speaker label; missing timestamps or no overlap
+leave the speaker unset, and multi-turn overlap records ambiguity metadata. The
+composition layer never rewrites ASR text, fabricates confidence, uses an LLM, or
+maps `SPEAKER_00` / `SPEAKER_01` to business roles.
+
+Manual browser-upload validation with a consented non-sensitive two-speaker file
+confirmed local two-speaker turn detection and ASR composition. It is a functional
+smoke test, not DER/JER measurement or an ASR accuracy benchmark.

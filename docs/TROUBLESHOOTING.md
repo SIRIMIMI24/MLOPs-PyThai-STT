@@ -80,5 +80,18 @@ First-run model downloads are setup-time network activity. After download, runti
   or the request is long. Choose a smaller installed model or lower `llm.max_tokens`.
 - `llama_cpp` is reserved for a future adapter; Phase 4 implements Ollama only.
 
+## Speaker diarization issues
+- Run `python scripts/setup_diarization_model.py` deliberately once. It places the
+  PyThaiASR Nemotron int8 ONNX files under `models\pythaiasr\nemotron-3-diarization`.
+  Doctor checks their presence but never loads them.
+- `diarization.device=auto` uses CUDA only when `onnxruntime` exposes
+  `CUDAExecutionProvider`. An NVIDIA GPU alone does not make CUDA usable. On this
+  RTX 4050 Laptop GPU with 6 GB dedicated VRAM, CPU is the verified current path.
+- `SPEAKER_00` and `SPEAKER_01` are anonymous local labels, not Agent/Customer.
+  Single-speaker audio can test model execution but cannot validate speaker
+  separation; use a consented non-sensitive two-speaker recording for that check.
+- Overlapping speech and coarse ASR timestamps can leave an ambiguous whole ASR
+  segment. The workbench records that condition and does not invent word timing.
+
 ## Audio format
 Normalize ASR input to a supported mono PCM format and sample rate in a temporary file when needed. Delete temporary files after inference unless debug mode is explicitly enabled.

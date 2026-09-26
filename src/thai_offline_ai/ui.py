@@ -4,6 +4,7 @@ import sys
 from typing import TYPE_CHECKING, Any
 
 from thai_offline_ai.adapters.asr import ASRAdapter
+from thai_offline_ai.adapters.diarization import DiarizationAdapter
 from thai_offline_ai.adapters.nlp import NLPAdapter
 from thai_offline_ai.adapters.tts import TTSAdapter
 from thai_offline_ai.batch import BatchASRProcessor, export_batch_result
@@ -11,6 +12,7 @@ from thai_offline_ai.config import Settings, load_settings
 from thai_offline_ai.errors import WorkbenchError
 from thai_offline_ai.llm_types import ChatMessage
 from thai_offline_ai.runtime import prepare_runtime
+from thai_offline_ai.speaker_composition import compose_speaker_transcript
 from thai_offline_ai.streaming import StreamingASRService
 
 if TYPE_CHECKING:
@@ -65,6 +67,7 @@ def build_app(settings: Settings | None = None) -> tuple[gr.Blocks, Settings]:
     adapter = NLPAdapter.from_config(settings.nlp, settings.app.offline_runtime)
     tts_adapter = TTSAdapter.from_settings(settings)
     asr_adapter = ASRAdapter(settings)
+    diarization_adapter = DiarizationAdapter(settings)
     streaming_service = StreamingASRService(settings)
     batch_processor = BatchASRProcessor(settings, adapter=asr_adapter)
 
@@ -128,6 +131,29 @@ def build_app(settings: Settings | None = None) -> tuple[gr.Blocks, Settings]:
                 f"Audio {result.total_audio_duration:.2f}s · Processing {result.total_processing_time:.2f}s"
             )
             return rows, info, str(json_path), str(csv_path)
+        except WorkbenchError as exc:
+            raise gr.Error(str(exc)) from None
+
+    def diarize(audio: str | None) -> tuple[list[dict[str, Any]], str]:
+        try:
+            if not audio:
+                raise WorkbenchError("เลือกไฟล์เสียงก่อนระบุผู้พูด")
+            result = diarization_adapter.diarize_file(audio)
+            return [turn.to_dict() for turn in result.turns], (
+                f"Speakers: {', '.join(result.speakers) or '-'} · {result.backend} · "
+                f"{result.model} · {result.device}"
+            )
+        except WorkbenchError as exc:
+            raise gr.Error(str(exc)) from None
+
+    def transcribe_speakers(audio: str | None) -> tuple[list[dict[str, Any]], str]:
+        try:
+            if not audio:
+                raise WorkbenchError("เลือกไฟล์เสียงก่อนถอดเสียงพร้อมผู้พูด")
+            combined = compose_speaker_transcript(
+                asr_adapter.transcribe_file(audio), diarization_adapter.diarize_file(audio)
+            )
+            return [segment.to_dict() for segment in combined.segments], combined.text
         except WorkbenchError as exc:
             raise gr.Error(str(exc)) from None
 
@@ -297,6 +323,43 @@ def build_app(settings: Settings | None = None) -> tuple[gr.Blocks, Settings]:
                 api_name="transcribe_batch",
                 concurrency_limit=1,
             )
+            gr.Markdown(
+                "### Speaker Diarization (Phase 5)\n"
+                "ระบุผู้พูดแบบไม่ระบุตัวตนเป็น SPEAKER_00, SPEAKER_01 โดยไม่อนุมาน Agent/Customer"
+            )
+            diarization_audio = gr.Audio(
+                label="ไฟล์เสียงสำหรับ Speaker Diarization",
+                type="filepath",
+                sources=["upload"],
+                interactive=settings.diarization.enabled,
+            )
+            with gr.Row():
+                diarize_button = gr.Button("ระบุผู้พูด", interactive=settings.diarization.enabled)
+                speakers_button = gr.Button(
+                    "ถอดเสียงพร้อมผู้พูด", interactive=settings.diarization.enabled
+                )
+            diarization_turns = gr.JSON(label="Speaker Turns")
+            diarization_info = gr.Textbox(label="ข้อมูล Speaker Diarization", interactive=False)
+            speaker_transcript = gr.JSON(label="ข้อความถอดเสียงพร้อมผู้พูด")
+            diarize_button.click(
+                diarize,
+                diarization_audio,
+                [diarization_turns, diarization_info],
+                api_name="diarize",
+                concurrency_limit=1,
+            )
+            speakers_button.click(
+                transcribe_speakers,
+                diarization_audio,
+                [speaker_transcript, diarization_info],
+                api_name="transcribe_speakers",
+                concurrency_limit=1,
+            )
+            if not settings.diarization.enabled:
+                gr.Markdown(
+                    "Speaker Diarization ถูกปิดอยู่ — ตั้งค่า `diarization.enabled=true` "
+                    "หลังติดตั้งโมเดลในเครื่อง"
+                )
             gr.Markdown(
                 "### Near Real-Time / Live (Phase 3.5)\n"
                 "เริ่ม session แล้วพูดผ่านไมโครโฟน ผลที่ถอดได้เป็นส่วนที่ยืนยันแล้ว; "

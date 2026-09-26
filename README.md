@@ -1,4 +1,4 @@
-# Thai Offline AI Workbench — Phase 4
+# Thai Offline AI Workbench — Phase 5
 
 A local, CPU-first Thai NLP application using **PyThaiNLP** and **Gradio**.
 The workbench supports Thai normalization, word and sentence tokenization, local
@@ -257,6 +257,64 @@ It reports backend/model/duration only; prompts and history are not persisted by
 workbench. Doctor checks executable, loopback service, and listed configured model
 without generating text or pulling a model. A future llama.cpp adapter can implement
 the same `ChatMessage -> LLMResult` boundary, but is not part of Phase 4.
+
+## Phase 5: local speaker diarization
+
+Phase 5 identifies anonymous speaker turns in a local audio file. It answers
+**who spoke when**; ASR answers **what was said**. Labels such as `SPEAKER_00`
+and `SPEAKER_01` are stable only within one diarization run and never mean
+Agent or Customer. Role mapping, streaming diarization, and conversation analysis
+are future work.
+
+The verified backend is PyThaiASR 2.2.0 `nemotron-3-diarization` with the local
+int8 ONNX files (`preprocessor_core.onnx`, `model.int8.onnx`, `constants.npz`),
+about 104 MB total. It receives audio normalized locally to mono 16 kHz PCM, and
+supports WAV, FLAC, MP3, and OGG through the existing file decoder.
+
+```powershell
+.\.venv\Scripts\python.exe scripts\setup_diarization_model.py
+```
+
+Set `diarization.enabled: true` in `config/settings.yaml`. The setup command is
+the only diarization command allowed to retrieve model files; the app, doctor,
+tests, ASR, batch ASR, and LLM do not download it.
+
+```powershell
+.\.venv\Scripts\python.exe -m thai_offline_ai.cli diarize C:\Audio\meeting.wav
+.\.venv\Scripts\python.exe -m thai_offline_ai.cli transcribe-speakers C:\Audio\meeting.wav
+```
+
+`transcribe-speakers` independently runs ASR and diarization, then assigns each
+timestamped ASR segment to the speaker turn with greatest temporal overlap. A tie
+uses earliest turn then speaker label and records ambiguity metadata; missing/no
+overlap timestamps leave `speaker: null`. It never invents word timestamps or
+splits text across a speaker boundary.
+
+PyThaiASR 2.2.0 also exposes `asr_diarize(data, asr_model, diarize_model, ...)`,
+which diarizes first and transcribes each returned turn. The workbench deliberately
+does not make that combined upstream helper its public contract: independent
+`ASRResult`, `DiarizationResult`, and composition preserve observable timestamps,
+raw ASR output, and ambiguity metadata for later evaluation.
+
+The current installed ONNX Runtime provides CPU execution only, so `device: auto`
+selects CPU. The RTX 4050 Laptop GPU is detected with 6 GB dedicated VRAM, but its
+presence alone is insufficient: CUDA is selected only if a compatible ONNX Runtime
+CUDA provider is actually installed. Do not treat Windows shared GPU memory as
+dedicated VRAM, and do not assume diarization and Ollama can share the GPU safely.
+
+The ASR tab includes **Speaker Diarization** and **Transcribe with Speakers**
+actions. Both remain lazy and do not load a model during UI startup. A real browser
+upload of a consented, non-sensitive two-speaker recording was manually verified:
+local diarization returned `SPEAKER_00` then `SPEAKER_01` with sensible timestamps
+and boundaries, and speaker-attributed ASR segments completed without a UI crash.
+This is a functional smoke result only. It does not identify Agent/Customer, claim
+perfect speaker identity, or establish DER/JER accuracy.
+
+ASR and diarization remain separate concerns: diarization answers **who spoke
+when**, while ASR answers **what was said**. Recognition errors observed in that
+browser sample are ASR errors and are evaluated separately by Phase 3.7; they are
+not diarization failures. Future diarization evaluation needs consented recordings
+with verified speaker-turn boundaries and should report DER (and optionally JER).
 
 ## CLI and configuration
 

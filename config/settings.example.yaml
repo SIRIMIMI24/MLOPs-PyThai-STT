@@ -40,3 +40,14 @@ llm:
   temperature: 0.2
   max_tokens: 512
   system_prompt: "You are a helpful Thai-language local assistant."
+
+diarization:
+  # Enable only after scripts/setup_diarization_model.py completes.
+  enabled: true
+  backend: "pythaiasr"
+  model: "nemotron-3-diarization"
+  # auto uses CUDA only when a compatible ONNX Runtime CUDA provider is available.
+  device: "auto"
+  precision: "int8"
+  sampling_rate: 16000
+  model_dir: "models/pythaiasr/nemotron-3-diarization"

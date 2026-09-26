@@ -111,6 +111,23 @@ def test_llm_ui_is_lazy_and_keeps_history_session_local(tmp_path, monkeypatch):
         demo.close()
 
 
+def test_diarization_ui_constructs_without_loading_model(tmp_path, monkeypatch):
+    settings = Settings(app=AppConfig(output_dir=str(tmp_path)))
+    settings.diarization.enabled = True
+
+    def unexpected_model_load(self):
+        raise AssertionError("Diarization must not load during UI construction")
+
+    monkeypatch.setattr(
+        "thai_offline_ai.adapters.diarization.DiarizationAdapter._load", unexpected_model_load
+    )
+    demo, _ = build_app(settings)
+    try:
+        assert any(c["props"].get("label") == "Speaker Turns" for c in demo.config["components"])
+    finally:
+        demo.close()
+
+
 def test_public_bind_rejected_before_gradio_construction(tmp_path):
     with pytest.raises(ConfigurationError, match="app.host"):
         build_app(Settings(app=AppConfig(host="0.0.0.0", output_dir=str(tmp_path))))

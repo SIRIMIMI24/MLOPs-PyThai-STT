@@ -60,12 +60,24 @@ class LLMConfig:
 
 
 @dataclass(slots=True)
+class DiarizationConfig:
+    enabled: bool = False
+    backend: str = "pythaiasr"
+    model: str = "nemotron-3-diarization"
+    device: str = "auto"
+    precision: str = "int8"
+    sampling_rate: int = 16000
+    model_dir: str = "models/pythaiasr/nemotron-3-diarization"
+
+
+@dataclass(slots=True)
 class Settings:
     app: AppConfig = field(default_factory=AppConfig)
     nlp: NLPConfig = field(default_factory=NLPConfig)
     tts: TTSConfig = field(default_factory=TTSConfig)
     asr: ASRConfig = field(default_factory=ASRConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
+    diarization: DiarizationConfig = field(default_factory=DiarizationConfig)
 
 
 SECTIONS = {
@@ -74,6 +86,7 @@ SECTIONS = {
     "tts": TTSConfig,
     "asr": ASRConfig,
     "llm": LLMConfig,
+    "diarization": DiarizationConfig,
 }
 WORD_ENGINES = {"newmm", "newmm-safe"}
 SENTENCE_ENGINES = {"crfcut", "whitespace", "whitespace+newline"}
@@ -100,6 +113,9 @@ ENV_FIELDS = {
     "THAI_AI_LLM_BASE_URL": ("llm", "base_url"),
     "THAI_AI_LLM_MODEL": ("llm", "model"),
     "THAI_AI_LLM_SYSTEM_PROMPT": ("llm", "system_prompt"),
+    "THAI_AI_DIARIZATION_ENABLED": ("diarization", "enabled"),
+    "THAI_AI_DIARIZATION_DEVICE": ("diarization", "device"),
+    "THAI_AI_DIARIZATION_MODEL_DIR": ("diarization", "model_dir"),
 }
 
 
@@ -138,6 +154,7 @@ def validate_settings(settings: Settings) -> Settings:
         "tts": {"pythaitts"},
         "asr": {"pythaiasr"},
         "llm": {"ollama", "llama_cpp"},
+        "diarization": {"pythaiasr"},
     }.items():
         if getattr(settings, name).backend not in choices:
             raise ConfigurationError(
@@ -156,6 +173,14 @@ def validate_settings(settings: Settings) -> Settings:
         )
     if settings.asr.device not in {"cpu", "cuda", "auto"}:
         raise ConfigurationError("asr.device must be cpu, cuda, or auto; Phase 1 uses no ASR.")
+    if settings.diarization.device not in {"cpu", "cuda", "auto"}:
+        raise ConfigurationError("diarization.device must be cpu, cuda, or auto.")
+    if settings.diarization.model != "nemotron-3-diarization":
+        raise ConfigurationError("diarization.model must be nemotron-3-diarization in Phase 5.")
+    if settings.diarization.precision not in {"int8", "fp32"}:
+        raise ConfigurationError("diarization.precision must be int8 or fp32.")
+    if settings.diarization.sampling_rate != 16000:
+        raise ConfigurationError("diarization.sampling_rate must be 16000 for the verified backend.")
     if settings.asr.sampling_rate <= 0:
         raise ConfigurationError("asr.sampling_rate must be positive.")
     if not 0.25 <= settings.asr.stream_chunk_seconds <= 3.0:
@@ -196,6 +221,10 @@ def validate_settings(settings: Settings) -> Settings:
     if asr_dir == Path(asr_dir.anchor) or str(asr_dir).startswith(("\\\\", "//")):
         raise ConfigurationError("asr.model_dir must be a local folder, not a drive root/share.")
     settings.asr.model_dir = str(asr_dir)
+    diarization_dir = Path(settings.diarization.model_dir).expanduser().resolve()
+    if diarization_dir == Path(diarization_dir.anchor) or str(diarization_dir).startswith(("\\\\", "//")):
+        raise ConfigurationError("diarization.model_dir must be a local folder, not a drive root/share.")
+    settings.diarization.model_dir = str(diarization_dir)
     return settings
 
 

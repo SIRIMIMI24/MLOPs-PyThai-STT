@@ -8,6 +8,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 from thai_offline_ai.adapters.asr import ASRAdapter
+from thai_offline_ai.adapters.diarization import DiarizationAdapter
 from thai_offline_ai.adapters.nlp import NLPAdapter
 from thai_offline_ai.adapters.tts import TTSAdapter
 from thai_offline_ai.batch import BatchASRProcessor, export_batch_result
@@ -21,6 +22,7 @@ from thai_offline_ai.evaluation import (
 )
 from thai_offline_ai.llm_types import ChatMessage
 from thai_offline_ai.runtime import prepare_runtime
+from thai_offline_ai.speaker_composition import compose_speaker_transcript
 from thai_offline_ai.streaming import StreamingASRService
 
 
@@ -37,6 +39,14 @@ def build_parser() -> argparse.ArgumentParser:
     asr = sub.add_parser("asr", help="Transcribe a supported local audio file")
     asr.add_argument("audio", nargs="?")
     asr.add_argument("--audio", dest="audio_option")
+    diarize = sub.add_parser("diarize", help="Identify anonymous speakers in a local audio file")
+    diarize.add_argument("audio", nargs="?")
+    diarize.add_argument("--audio", dest="audio_option")
+    speakers = sub.add_parser(
+        "transcribe-speakers", help="Run local ASR plus timestamp-based speaker attribution"
+    )
+    speakers.add_argument("audio", nargs="?")
+    speakers.add_argument("--audio", dest="audio_option")
     batch = sub.add_parser("asr-batch", help="Transcribe supported audio files in a local folder")
     batch.add_argument("directory", help="Local folder containing WAV, FLAC, MP3, or OGG files")
     batch.add_argument("--recursive", action="store_true", help="Include supported audio in subfolders")
@@ -76,10 +86,22 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command in {"nlp", "tts", "llm"} and (args.text is None) == (args.text_option is None):
             raise WorkbenchError('Provide text once: nlp "Thai text" or nlp --text "Thai text".')
         prepare_runtime(settings)
-        if args.command == "asr":
+        if args.command in {"asr", "diarize", "transcribe-speakers"}:
             if (args.audio is None) == (args.audio_option is None):
-                raise WorkbenchError("Provide one audio path: asr audio.wav or asr --audio audio.wav.")
-            print(json.dumps(ASRAdapter(settings).transcribe_file(args.audio or args.audio_option).to_dict(), ensure_ascii=False, indent=2))
+                raise WorkbenchError(
+                    f"Provide one audio path: {args.command} audio.wav or {args.command} --audio audio.wav."
+                )
+            audio_path = args.audio or args.audio_option
+            if args.command == "asr":
+                result = ASRAdapter(settings).transcribe_file(audio_path)
+            elif args.command == "diarize":
+                result = DiarizationAdapter(settings).diarize_file(audio_path)
+            else:
+                result = compose_speaker_transcript(
+                    ASRAdapter(settings).transcribe_file(audio_path),
+                    DiarizationAdapter(settings).diarize_file(audio_path),
+                )
+            print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
             return 0
         if args.command == "asr-batch":
             processor = BatchASRProcessor(settings)
