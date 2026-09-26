@@ -1,0 +1,60 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "thai-offline-ai-workbench"
+version = "0.1.0"
+description = "Local/offline Thai NLP, TTS, ASR, and local LLM workbench"
+readme = "README.md"
+requires-python = ">=3.10,<3.13"
+dependencies = [
+  "PyYAML>=6.0",
+  "gradio>=5.50,<6",
+  "pythainlp>=5.3.7,<6",
+  # Required by PyThaiNLP's bundled CRF sentence tokenizer, not its base extra.
+  "python-crfsuite>=0.9.7",
+]
+
+[project.optional-dependencies]
+tts = [
+  "PyThaiTTS>=0.4.2,<0.5",
+]
+asr = [
+  # The current upstream project may contain newer APIs than the PyPI release.
+  # Codex must verify before pinning a production strategy.
+  "pythaiasr>=1.3.0",
+]
+llm = [
+  "requests>=2.32",
+]
+dev = [
+  "pytest>=8.0",
+  "ruff>=0.9",
+]
+all = [
+  "PyThaiTTS>=0.4.2,<0.5",
+  "pythaiasr>=1.3.0",
+  "requests>=2.32",
+  "pytest>=8.0",
+  "ruff>=0.9",
+]
+
+[project.scripts]
+thai-offline-ai = "thai_offline_ai.cli:main"
+thai-offline-doctor = "thai_offline_ai.diagnostics:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+testpaths = ["tests"]
+markers = [
+  "integration: opt-in tests that may need models or extra dependencies",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+extend-exclude = [".tools", ".venv"]

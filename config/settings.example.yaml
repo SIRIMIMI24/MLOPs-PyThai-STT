@@ -1,0 +1,35 @@
+app:
+  host: "127.0.0.1"
+  port: 7860
+  output_dir: "outputs"
+  offline_runtime: true
+  log_level: "WARNING"
+
+nlp:
+  enabled: true
+  backend: "pythainlp"
+  word_engine: "newmm"
+  sentence_engine: "crfcut"
+
+# Reserved for future phases. Phase 1 provides no optional inference actions.
+tts:
+  enabled: false
+  backend: "pythaitts"
+  model: "lunarlist_onnx"
+  voice: null
+
+asr:
+  enabled: false
+  backend: "pythaiasr"
+  model: null
+  device: "cpu"
+  sampling_rate: 16000
+
+llm:
+  enabled: false
+  backend: "ollama"
+  base_url: "http://127.0.0.1:11434"
+  model: "qwen3:4b"
+  model_path: null
+  temperature: 0.2
+  max_tokens: 512
