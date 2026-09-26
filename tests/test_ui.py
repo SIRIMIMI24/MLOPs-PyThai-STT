@@ -1,10 +1,10 @@
 import asyncio
 import socket
-import sys
 
 import httpx
 import pytest
 
+from thai_offline_ai.adapters.tts import TTSAdapter
 from thai_offline_ai.config import AppConfig, Settings
 from thai_offline_ai.errors import ConfigurationError
 from thai_offline_ai.ui import CONTENT_SECURITY_POLICY, build_app, launch_app
@@ -21,9 +21,6 @@ def test_real_ui_construction_and_callback(tmp_path):
         result = asyncio.run(demo.process_api(fn, inputs=["ประเทศไทย"]))
         assert result["data"][0] == "ประเทศไทย"
         assert result["data"][3] > 0
-        assert not any(
-            name in sys.modules for name in ["pythaitts", "pythaiasr", "torch", "onnxruntime"]
-        )
     finally:
         demo.close()
 
@@ -37,6 +34,21 @@ def test_disabled_nlp_ui(tmp_path):
             c for c in demo.config["components"] if c["props"].get("label") == "ข้อความภาษาไทย"
         )
         assert source["props"]["interactive"] is False
+    finally:
+        demo.close()
+
+
+def test_tts_enabled_ui_does_not_load_model(tmp_path, monkeypatch):
+    settings = Settings(app=AppConfig(output_dir=str(tmp_path)))
+    settings.tts.enabled = True
+
+    def unexpected_model_load(self):
+        raise AssertionError("TTS must not load during UI construction")
+
+    monkeypatch.setattr(TTSAdapter, "_get_model", unexpected_model_load)
+    demo, _ = build_app(settings)
+    try:
+        assert any(c["props"].get("label") == "เสียงที่สร้าง" for c in demo.config["components"])
     finally:
         demo.close()
 

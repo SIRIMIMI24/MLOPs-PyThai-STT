@@ -4,8 +4,10 @@ import argparse
 import json
 import sys
 from collections.abc import Sequence
+from dataclasses import asdict
 
 from thai_offline_ai.adapters.nlp import NLPAdapter
+from thai_offline_ai.adapters.tts import TTSAdapter
 from thai_offline_ai.config import load_settings
 from thai_offline_ai.errors import WorkbenchError
 from thai_offline_ai.runtime import prepare_runtime
@@ -18,10 +20,9 @@ def build_parser() -> argparse.ArgumentParser:
     nlp = sub.add_parser("nlp", help="Analyze Thai text locally")
     nlp.add_argument("text", nargs="?", help="Thai text (quote text containing spaces)")
     nlp.add_argument("--text", dest="text_option", help="Compatible alternative to positional text")
-    # Keep existing command syntax, but do not call unverified inference in Phase 1.
-    tts = sub.add_parser("tts", help="Reserved for a future phase")
-    tts.add_argument("--text", required=True)
-    tts.add_argument("--output")
+    tts = sub.add_parser("tts", help="Generate Thai speech locally")
+    tts.add_argument("text", nargs="?", help="Thai text (quote text containing spaces)")
+    tts.add_argument("--text", dest="text_option", help="Compatible alternative to positional text")
     asr = sub.add_parser("asr", help="Reserved for a future phase")
     asr.add_argument("--audio", required=True)
     chat = sub.add_parser("chat", help="Reserved for a future phase")
@@ -41,14 +42,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         return doctor_main(["--config", args.config] if args.config else [])
     try:
         settings = load_settings(args.config)
-        if args.command != "nlp":
+        if args.command in {"asr", "chat"}:
             raise WorkbenchError(
                 f"{args.command} is not configured in Phase 1; inference is reserved for a future phase. "
                 "Use the nlp command. No model was loaded."
             )
-        if (args.text is None) == (args.text_option is None):
+        if args.command in {"nlp", "tts"} and (args.text is None) == (args.text_option is None):
             raise WorkbenchError('Provide text once: nlp "Thai text" or nlp --text "Thai text".')
         prepare_runtime(settings)
+        if args.command == "tts":
+            result = TTSAdapter.from_settings(settings).synthesize(
+                args.text if args.text is not None else args.text_option
+            )
+            print(json.dumps(asdict(result), ensure_ascii=False, indent=2))
+            return 0
         result = NLPAdapter.from_config(settings.nlp, settings.app.offline_runtime).analyze(
             args.text if args.text is not None else args.text_option
         )

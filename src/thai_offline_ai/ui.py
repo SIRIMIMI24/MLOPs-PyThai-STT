@@ -4,6 +4,7 @@ import sys
 from typing import TYPE_CHECKING, Any
 
 from thai_offline_ai.adapters.nlp import NLPAdapter
+from thai_offline_ai.adapters.tts import TTSAdapter
 from thai_offline_ai.config import Settings, load_settings
 from thai_offline_ai.errors import WorkbenchError
 from thai_offline_ai.runtime import prepare_runtime
@@ -58,6 +59,7 @@ def build_app(settings: Settings | None = None) -> tuple[gr.Blocks, Settings]:
     from thai_offline_ai.diagnostics import collect_diagnostics, format_report
 
     adapter = NLPAdapter.from_config(settings.nlp, settings.app.offline_runtime)
+    tts_adapter = TTSAdapter.from_settings(settings)
 
     def analyze(text: str) -> tuple[str, list[str], list[str], int]:
         try:
@@ -74,6 +76,17 @@ def build_app(settings: Settings | None = None) -> tuple[gr.Blocks, Settings]:
     def system_status() -> str:
         # Metadata/discovery only in UI; the doctor command also checks required imports.
         return format_report(collect_diagnostics(settings, check_imports=False))
+
+    def synthesize(text: str) -> tuple[str, str]:
+        try:
+            result = tts_adapter.synthesize(text)
+            return result.audio_path, (
+                f"สร้างไฟล์แล้ว: {result.audio_path}\n"
+                f"Backend: {result.backend}; Model: {result.model}; "
+                f"Sample rate: {result.sample_rate} Hz"
+            )
+        except WorkbenchError as exc:
+            raise gr.Error(str(exc)) from None
 
     theme = gr.themes.Default(
         font=["Tahoma", "Arial", "sans-serif"], font_mono=["Consolas", "monospace"]
@@ -108,7 +121,25 @@ def build_app(settings: Settings | None = None) -> tuple[gr.Blocks, Settings]:
                 api_name="analyze",
                 concurrency_limit=1,
             )
-        for title in ("TTS", "ASR", "Local LLM"):
+        with gr.Tab("TTS"):
+            gr.Markdown(
+                "## สังเคราะห์เสียงภาษาไทย (Thai TTS)\n"
+                "PyThaiTTS Lunarlist ONNX ใช้ CPU และโหลดโมเดลเมื่อกดสร้างเสียงเท่านั้น"
+            )
+            gr.Markdown(
+                f"Backend: `{settings.tts.backend}` · Model: `{settings.tts.model}` · "
+                f"Sample rate: {settings.tts.sample_rate} Hz"
+            )
+            tts_source = gr.Textbox(
+                label="ข้อความภาษาไทย", lines=4, interactive=settings.tts.enabled
+            )
+            tts_button = gr.Button("สร้างเสียง", interactive=settings.tts.enabled)
+            tts_audio = gr.Audio(label="เสียงที่สร้าง", type="filepath", interactive=False)
+            tts_info = gr.Textbox(label="ข้อมูลไฟล์", lines=3, interactive=False)
+            tts_button.click(synthesize, tts_source, [tts_audio, tts_info], api_name="synthesize")
+            if not settings.tts.enabled:
+                gr.Markdown("TTS ถูกปิดอยู่ — ตั้งค่า `tts.enabled=true` หลังติดตั้งโมเดลในเครื่อง")
+        for title in ("ASR", "Local LLM"):
             with gr.Tab(title):
                 gr.Markdown(f"## {title}\nยังไม่พร้อมใช้งาน — สงวนไว้สำหรับระยะถัดไป (Future phase)")
         with gr.Tab("System"):

@@ -4,6 +4,7 @@ import sys
 
 import pytest
 
+from thai_offline_ai.adapters.tts import TTSResult
 from thai_offline_ai.cli import main
 
 
@@ -66,3 +67,14 @@ def test_invalid_config_cli(monkeypatch, capsys):
     monkeypatch.setenv("THAI_AI_PORT", "invalid")
     assert main(["nlp", "test"]) == 2
     assert "THAI_AI_PORT" in capsys.readouterr().err
+
+
+def test_mocked_tts_cli(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("THAI_AI_OUTPUT_DIR", str(tmp_path / "outputs"))
+    monkeypatch.setenv("THAI_AI_TTS_ENABLED", "true")
+    monkeypatch.setattr(
+        "thai_offline_ai.cli.TTSAdapter.synthesize",
+        lambda self, text: TTSResult(str(tmp_path / "speech.wav"), 22050, "pythaitts", "lunarlist_onnx"),
+    )
+    assert main(["tts", "สวัสดีครับ"]) == 0
+    assert json.loads(capsys.readouterr().out)["sample_rate"] == 22050

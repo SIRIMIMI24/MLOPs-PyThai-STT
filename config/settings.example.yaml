@@ -16,7 +16,9 @@ tts:
   enabled: false
   backend: "pythaitts"
   model: "lunarlist_onnx"
-  voice: null
+  # PyThaiTTS 0.4.2 Lunarlist ONNX has a fixed 22050 Hz output and no voice selector.
+  sample_rate: 22050
+  model_dir: "models/pythaitts/lunarlist_onnx"
 
 asr:
   enabled: false

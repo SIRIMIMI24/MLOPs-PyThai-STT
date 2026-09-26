@@ -42,6 +42,26 @@ def output_path(settings: Settings, filename: str) -> Path:
     return target
 
 
+def output_artifact_path(settings: Settings, category: str, filename: str) -> Path:
+    """Create a category folder and return a safe, unique artifact destination."""
+    if not category or any(c in category for c in "/\\:\x00") or category in {".", ".."}:
+        raise WorkbenchError("Output category must be a simple folder name.")
+    if not filename or any(c in filename for c in "/\\:\x00") or filename in {".", ".."}:
+        raise WorkbenchError("Output filename must be a simple name inside app.output_dir.")
+    directory = prepare_output_dir(settings)
+    artifact_dir = (directory / category).resolve()
+    if artifact_dir.parent != directory:
+        raise WorkbenchError("Output category escapes app.output_dir.")
+    try:
+        artifact_dir.mkdir(parents=False, exist_ok=True)
+    except OSError as exc:
+        raise WorkbenchError("Cannot create local output category folder.") from exc
+    target = (artifact_dir / filename).resolve()
+    if target.parent != artifact_dir:
+        raise WorkbenchError("Output path escapes app.output_dir.")
+    return target
+
+
 def prepare_runtime(settings: Settings) -> Path:
     """Apply privacy before UI/backend imports, then validate local output storage."""
     validate_settings(settings)

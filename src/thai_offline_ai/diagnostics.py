@@ -82,14 +82,33 @@ def collect_diagnostics(
             settings.nlp.enabled and settings.nlp.sentence_engine == "crfcut",
         ),
         ("gradio", "gradio", True),
-        ("PyThaiTTS", "pythaitts", False),
+        ("PyThaiTTS", "pythaitts", settings.tts.enabled),
         ("pythaiasr", "pythaiasr", False),
-        ("onnxruntime", "onnxruntime", False),
+        ("onnxruntime", "onnxruntime", settings.tts.enabled),
         ("onnxruntime-gpu", "onnxruntime", False),
     ]:
         results.append(
             _package_check(distribution, module, required=required, check_imports=check_imports)
         )
+    if settings.tts.enabled:
+        from thai_offline_ai.adapters.tts import model_is_available
+
+        ready = model_is_available(settings.tts.model_dir)
+        results.append(
+            Check(
+                "OK" if ready else "WARN",
+                "TTS model cache",
+                f"{settings.tts.model_dir}; "
+                + ("all Lunarlist ONNX files found." if ready else "missing; run python scripts/setup_tts_model.py."),
+            )
+        )
+        try:
+            import onnxruntime
+
+            results.append(Check("OK", "ONNX providers", ", ".join(onnxruntime.get_available_providers())))
+        except Exception as exc:  # noqa: BLE001
+            results.append(Check("WARN", "ONNX providers", f"not available ({type(exc).__name__})"))
+        results.append(Check("SKIP", "TTS synthesis", "model intentionally not loaded by doctor."))
     if settings.nlp.enabled and check_imports and not any(c.status == "FAIL" for c in results):
         try:
             from thai_offline_ai.adapters.nlp import NLPAdapter
@@ -117,14 +136,21 @@ def collect_diagnostics(
     results.append(Check("OK", "Log level", settings.app.log_level))
     for name in ("nlp", "tts", "asr", "llm"):
         component = getattr(settings, name)
-        status = (
-            ("OK" if component.enabled else "SKIP")
-            if name == "nlp"
-            else ("WARN" if component.enabled else "SKIP")
-        )
+        if name == "tts" and component.enabled:
+            from thai_offline_ai.adapters.tts import model_is_available
+
+            status = "OK" if model_is_available(settings.tts.model_dir) else "WARN"
+        elif name == "nlp":
+            status = "OK" if component.enabled else "SKIP"
+        else:
+            status = "WARN" if component.enabled else "SKIP"
         detail = f"enabled={component.enabled}; backend={component.backend}"
         if name != "nlp":
-            detail += "; future phase, inference unavailable even when enabled."
+            detail += (
+                "; Phase 2 cache ready." if name == "tts" and status == "OK" else
+                "; run python scripts/setup_tts_model.py." if name == "tts" and component.enabled else
+                "; future phase, inference unavailable even when enabled."
+            )
         results.append(Check(status, f"Component {name}", detail))
     results.append(
         Check(

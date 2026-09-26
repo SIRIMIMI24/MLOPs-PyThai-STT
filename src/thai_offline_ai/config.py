@@ -32,7 +32,8 @@ class TTSConfig:
     enabled: bool = False
     backend: str = "pythaitts"
     model: str = "lunarlist_onnx"
-    voice: str | None = None
+    sample_rate: int = 22050
+    model_dir: str = "models/pythaitts/lunarlist_onnx"
 
 
 @dataclass(slots=True)
@@ -86,6 +87,8 @@ ENV_FIELDS = {
     "THAI_AI_NLP_SENTENCE_ENGINE": ("nlp", "sentence_engine"),
     "THAI_AI_TTS_ENABLED": ("tts", "enabled"),
     "THAI_AI_TTS_BACKEND": ("tts", "backend"),
+    "THAI_AI_TTS_MODEL": ("tts", "model"),
+    "THAI_AI_TTS_MODEL_DIR": ("tts", "model_dir"),
     "THAI_AI_ASR_ENABLED": ("asr", "enabled"),
     "THAI_AI_ASR_BACKEND": ("asr", "backend"),
     "THAI_AI_LLM_ENABLED": ("llm", "enabled"),
@@ -149,6 +152,14 @@ def validate_settings(settings: Settings) -> Settings:
         raise ConfigurationError("asr.device must be cpu, cuda, or auto; Phase 1 uses no ASR.")
     if settings.asr.sampling_rate <= 0:
         raise ConfigurationError("asr.sampling_rate must be positive.")
+    if settings.tts.model != "lunarlist_onnx":
+        raise ConfigurationError(
+            "tts.model must be lunarlist_onnx. It is the verified CPU/ONNX backend for Phase 2."
+        )
+    if settings.tts.sample_rate != 22050:
+        raise ConfigurationError(
+            "tts.sample_rate must be 22050 for the verified lunarlist_onnx backend."
+        )
     if not 0 <= settings.llm.temperature <= 2 or settings.llm.max_tokens <= 0:
         raise ConfigurationError("llm.temperature must be 0–2 and llm.max_tokens positive.")
     raw = settings.app.output_dir
@@ -163,6 +174,16 @@ def validate_settings(settings: Settings) -> Settings:
     if output == Path(output.anchor) or str(output).startswith(("\\\\", "//")):
         raise ConfigurationError("app.output_dir must be a local folder, not a drive root/share.")
     settings.app.output_dir = str(output)
+    raw_model_dir = settings.tts.model_dir
+    if raw_model_dir.startswith(("\\\\", "//")) or PureWindowsPath(raw_model_dir).drive.startswith("\\"):
+        raise ConfigurationError("tts.model_dir must be a local directory, not a network share.")
+    try:
+        model_dir = Path(raw_model_dir).expanduser().resolve()
+    except (OSError, ValueError, RuntimeError) as exc:
+        raise ConfigurationError("tts.model_dir is invalid; choose a local models folder.") from exc
+    if model_dir == Path(model_dir.anchor) or str(model_dir).startswith(("\\\\", "//")):
+        raise ConfigurationError("tts.model_dir must be a local folder, not a drive root/share.")
+    settings.tts.model_dir = str(model_dir)
     return settings
 
 

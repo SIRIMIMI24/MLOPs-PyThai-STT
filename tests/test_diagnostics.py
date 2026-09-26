@@ -56,8 +56,9 @@ def test_invalid_config_returns_failure(monkeypatch, tmp_path, capsys):
     assert "[FAIL] Configuration" in capsys.readouterr().out
 
 
-def test_enabling_future_component_reports_warning(tmp_path):
+def test_enabling_tts_without_model_reports_warning(tmp_path):
     settings = Settings(app=AppConfig(output_dir=str(tmp_path)))
     settings.tts.enabled = True
+    settings.tts.model_dir = str(tmp_path / "missing-model")
     checks = diagnostics.collect_diagnostics(settings, check_imports=False)
     assert any(c.status == "WARN" and c.name == "Component tts" for c in checks)

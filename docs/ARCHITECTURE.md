@@ -1,10 +1,11 @@
 # Architecture
 
-## Phase 1 implementation boundary
+## Phase 2 implementation boundary
 
-The diagram below remains the target architecture. Phase 1 exposes only
-`NLPAdapter` through CLI and Gradio. TTS/ASR/LLM tabs are placeholders; their old
-adapter prototypes remain unverified and are not called by Phase 1 entry points.
+The diagram below remains the target architecture. Phase 2 exposes `NLPAdapter`
+and the CPU-only `TTSAdapter` through CLI and Gradio. TTS uses the verified
+PyThaiTTS 0.4.2 `lunarlist_onnx` backend and a configured local Hugging Face cache;
+the adapter forces cache-only loading at runtime. ASR and LLM tabs remain placeholders.
 
 Shared supporting modules preserve the existing boundaries:
 - `config.py`: strict dataclass/YAML/environment validation, including local endpoints.

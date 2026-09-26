@@ -1,9 +1,9 @@
-# Thai Offline AI Workbench — Phase 1
+# Thai Offline AI Workbench — Phase 2
 
 A local, CPU-first Thai NLP application using **PyThaiNLP** and **Gradio**.
-Phase 1 supports Thai normalization, word and sentence tokenization, token counts,
-and Thai/Latin character counts. The UI preserves Home, NLP, TTS, ASR, Local LLM,
-and System tabs. **Only NLP is functional in this phase.**
+Phase 2 supports Thai normalization, word and sentence tokenization, token counts,
+Thai/Latin character counts, and local Thai TTS through PyThaiTTS Lunarlist ONNX.
+ASR and Local LLM remain future phases.
 
 TTS, ASR, LLM inference, and microphone input are reserved for later phases.
 No GPU, NVIDIA/CUDA, WSL, Docker, API key, or separately downloaded model is needed.
@@ -80,6 +80,29 @@ Open **http://127.0.0.1:7860**, select **NLP**, enter Thai text, and click
 count appear separately. Stop the application with **Ctrl+C**.
 
 Subsequent runs require only `.\.venv\Scripts\python.exe run_app.py`.
+
+## Phase 2: local Thai TTS setup
+
+Install the optional Phase 2 packages, then explicitly download the four Lunarlist
+ONNX files once. Only the setup command needs internet; the app, doctor, and tests
+never download a model. The default cache is `models\pythaitts\lunarlist_onnx` and
+generated WAV files are saved under `outputs\tts`.
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -e ".[tts,dev]"
+.\.venv\Scripts\python.exe scripts\setup_tts_model.py
+```
+
+Set `tts.enabled: true` in `config/settings.yaml`, then run either:
+
+```powershell
+.\.venv\Scripts\python.exe -m thai_offline_ai.cli tts "สวัสดีครับ ยินดีต้อนรับสู่ระบบ AI ภาษาไทย"
+.\.venv\Scripts\python.exe run_app.py
+```
+
+The TTS tab loads the CPU ONNX model only after **สร้างเสียง** is selected. A
+missing local cache produces an actionable setup message and never falls back to a
+remote inference service.
 
 ## CLI and configuration
 
