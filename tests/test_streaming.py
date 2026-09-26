@@ -69,6 +69,22 @@ def test_streaming_resamples_and_finalizes_in_order(tmp_path, monkeypatch):
     assert [event.text for event in service.get_events(session)] == ["ส่วนแรก", "ส่วนสุดท้าย"]
 
 
+def test_streaming_records_local_latency_and_session_rtf(tmp_path, monkeypatch):
+    service = fake_service(tmp_path, monkeypatch)
+    session = service.start_session()
+    event = service.push_audio(session, np.ones(16000), 16000)[0]
+    timing = event.metadata["timing"]
+    assert timing["audio_seconds"] == 1
+    assert timing["inference_seconds"] >= 0
+    assert timing["chunk_rtf"] >= 0
+    assert timing["chunk_received_at_monotonic_s"] <= timing["event_emitted_at_monotonic_s"]
+    service.finalize(session)
+    metrics = service.get_metrics(session)
+    assert metrics.audio_seconds_processed == 1
+    assert metrics.session_rtf is not None
+    assert metrics.state == "stopped"
+
+
 def test_streaming_sessions_are_isolated(tmp_path, monkeypatch):
     service = fake_service(tmp_path, monkeypatch)
     left, right = service.start_session(), service.start_session()

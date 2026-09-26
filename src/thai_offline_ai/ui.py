@@ -104,7 +104,7 @@ def build_app(settings: Settings | None = None) -> tuple[gr.Blocks, Settings]:
     def start_live_session() -> tuple[str, str, str, str]:
         try:
             session_id = streaming_service.start_session()
-            return session_id, "", "", "กำลังรอเสียงจากไมโครโฟน (16 kHz จะถูกแปลงอัตโนมัติ)"
+            return session_id, "", "", "Listening · รอเสียงจากไมโครโฟน (16 kHz จะถูกแปลงอัตโนมัติ)"
         except WorkbenchError as exc:
             raise gr.Error(str(exc)) from None
 
@@ -118,8 +118,20 @@ def build_app(settings: Settings | None = None) -> tuple[gr.Blocks, Settings]:
             sample_rate, samples = audio
             streaming_service.push_audio(active_session, samples, int(sample_rate))
             events = streaming_service.get_events(active_session)
+            metrics = streaming_service.get_metrics(active_session)
             final_text = "".join(event.text for event in events)
-            return active_session, "", final_text, f"รับแล้ว {len(events)} ส่วนที่ยืนยันแล้ว"
+            latency = metrics.latest_chunk_latency_seconds
+            latency_text = f"{latency * 1000:.0f} ms" if latency is not None else "n/a"
+            return (
+                active_session,
+                "",
+                final_text,
+                (
+                    "Processing complete · "
+                    f"{metrics.finalized_events} finalized · latest {latency_text} · "
+                    f"session {metrics.session_duration_seconds:.1f}s"
+                ),
+            )
         except WorkbenchError as exc:
             raise gr.Error(str(exc)) from None
 
@@ -129,9 +141,16 @@ def build_app(settings: Settings | None = None) -> tuple[gr.Blocks, Settings]:
                 return "", "", "", "ยังไม่มี Live session"
             streaming_service.finalize(session_id)
             events = streaming_service.get_events(session_id)
+            metrics = streaming_service.get_metrics(session_id)
             final_text = "".join(event.text for event in events)
             streaming_service.close_session(session_id)
-            return "", "", final_text, "สิ้นสุด session แล้ว"
+            rtf_text = f"{metrics.session_rtf:.2f}" if metrics.session_rtf is not None else "n/a"
+            return (
+                "",
+                "",
+                final_text,
+                f"Stopped · {metrics.finalized_events} finalized · session RTF {rtf_text}",
+            )
         except WorkbenchError as exc:
             raise gr.Error(str(exc)) from None
 

@@ -154,6 +154,25 @@ not fetch models or call cloud ASR services. Future VAD may replace controlled
 chunking, and Phase 5.5 may add speaker attribution; Phase 3.5 events already carry
 `speaker: null` and `confidence: null` unless a future verified backend supplies them.
 
+### Phase 3.5.1 microphone validation
+
+The local service records only process-local, monotonic timing metadata: audio-chunk
+receipt, inference start/end, event emission, audio duration, inference duration, and
+per-chunk RTF. Session metrics report processed audio, total inference, session RTF,
+the latest chunk-processing latency, finalized event count, and session duration.
+Browser capture latency is not included because the browser does not supply a reliable
+server-visible capture timestamp. Timing metadata contains no microphone samples and
+is discarded with the session.
+
+To validate the actual Windows microphone: run `run_app.py`, open
+`http://127.0.0.1:7860`, select **ASR**, select **เริ่ม Live transcription**, allow the
+browser microphone permission for this loopback page, speak a short Thai sentence,
+then select **หยุดและสรุปผล**. Confirm that the status changes from **Listening** to
+**Processing complete** and then **Stopped**, that the finalized transcript updates
+without duplicate text, and that a second Start/Stop session begins with no text from
+the first. The Live status exposes the latest service latency and final session RTF;
+it does not claim end-to-end capture latency.
+
 ## CLI and configuration
 
 The original `--text` syntax remains supported:

@@ -82,6 +82,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                         time.sleep(len(chunk) / sample_rate)
                 for event in service.finalize(session_id):
                     print(json.dumps(event.to_dict(), ensure_ascii=False))
+                print(json.dumps({"session_metrics": service.get_metrics(session_id).to_dict()}, ensure_ascii=False))
             finally:
                 service.close_session(session_id)
             print(json.dumps({"elapsed_seconds": round(time.perf_counter() - began, 3)}, ensure_ascii=False))

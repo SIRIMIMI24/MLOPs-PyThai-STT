@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import time
 from collections import deque
 from dataclasses import asdict, dataclass, field
 from threading import Lock
@@ -31,12 +32,33 @@ class StreamingASREvent:
         return asdict(self)
 
 
+@dataclass(frozen=True, slots=True)
+class StreamingSessionMetrics:
+    """Local service timing; monotonic values are meaningful only in this process."""
+
+    session_id: str
+    state: str
+    session_duration_seconds: float
+    audio_seconds_processed: float
+    inference_seconds: float
+    session_rtf: float | None
+    finalized_events: int
+    latest_chunk_latency_seconds: float | None
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
 @dataclass(slots=True)
 class _Session:
     decoder: Any
     sequence: int = 0
     events: deque[StreamingASREvent] = field(default_factory=lambda: deque(maxlen=256))
     closed: bool = False
+    started_at: float = field(default_factory=time.perf_counter)
+    audio_seconds_processed: float = 0.0
+    inference_seconds: float = 0.0
+    latest_chunk_latency_seconds: float | None = None
     lock: Lock = field(default_factory=Lock)
 
 
@@ -140,7 +162,15 @@ class StreamingASRService:
         except Exception as exc:
             raise WorkbenchError("Streaming audio must be a non-empty readable PCM audio chunk.") from exc
 
-    def _record(self, session_id: str, session: _Session, text: str, *, is_final: bool) -> list[StreamingASREvent]:
+    def _record(
+        self,
+        session_id: str,
+        session: _Session,
+        text: str,
+        *,
+        is_final: bool,
+        timing: dict[str, float] | None = None,
+    ) -> list[StreamingASREvent]:
         text = str(text).strip()
         if not text:
             return []
@@ -150,7 +180,11 @@ class StreamingASRService:
             sequence=session.sequence,
             text=text,
             is_final=is_final,
-            metadata={"backend": "pythaiasr", "model": self.settings.asr.model},
+            metadata={
+                "backend": "pythaiasr",
+                "model": self.settings.asr.model,
+                **({"timing": timing} if timing else {}),
+            },
         )
         session.events.append(event)
         return [event]
@@ -158,7 +192,9 @@ class StreamingASRService:
     def push_audio(self, session_id: str, samples: Any, sample_rate: int) -> list[StreamingASREvent]:
         """Accept one audio chunk and return newly finalised incremental text."""
         session = self._get_session(session_id)
+        received_at = time.perf_counter()
         audio = self._normalise_chunk(samples, sample_rate)
+        audio_seconds = len(audio) / self.settings.asr.sampling_rate
         with session.lock:
             if session.closed:
                 raise WorkbenchError("Streaming ASR session is already finalised.")
@@ -166,31 +202,88 @@ class StreamingASRService:
             try:
                 # PyThaiASR's ONNX model is shared and its thread safety is not documented.
                 with self._inference_lock:
+                    inference_started_at = time.perf_counter()
                     raw_pieces = decoder.process_chunk(audio)
+                    inference_ended_at = time.perf_counter()
             except Exception as exc:
                 raise WorkbenchError("Thai streaming ASR failed while processing audio.") from exc
             pieces = [raw_pieces] if isinstance(raw_pieces, str) else raw_pieces
-            return [event for piece in pieces for event in self._record(session_id, session, piece, is_final=True)]
+            inference_seconds = inference_ended_at - inference_started_at
+            emitted_at = time.perf_counter()
+            session.audio_seconds_processed += audio_seconds
+            session.inference_seconds += inference_seconds
+            session.latest_chunk_latency_seconds = emitted_at - received_at
+            timing = {
+                "chunk_received_at_monotonic_s": received_at,
+                "inference_started_at_monotonic_s": inference_started_at,
+                "inference_ended_at_monotonic_s": inference_ended_at,
+                "event_emitted_at_monotonic_s": emitted_at,
+                "audio_seconds": audio_seconds,
+                "inference_seconds": inference_seconds,
+                "chunk_processing_latency_seconds": emitted_at - received_at,
+                "chunk_rtf": inference_seconds / audio_seconds,
+            }
+            return [
+                event
+                for piece in pieces
+                for event in self._record(session_id, session, piece, is_final=True, timing=timing)
+            ]
 
     def get_events(self, session_id: str) -> list[StreamingASREvent]:
         session = self._get_session(session_id)
         with session.lock:
             return list(session.events)
 
+    def get_metrics(self, session_id: str) -> StreamingSessionMetrics:
+        """Return local timing without retaining or exposing raw microphone audio."""
+        session = self._get_session(session_id)
+        with session.lock:
+            return StreamingSessionMetrics(
+                session_id=session_id,
+                state="stopped" if session.closed else "listening",
+                session_duration_seconds=time.perf_counter() - session.started_at,
+                audio_seconds_processed=session.audio_seconds_processed,
+                inference_seconds=session.inference_seconds,
+                session_rtf=(session.inference_seconds / session.audio_seconds_processed)
+                if session.audio_seconds_processed
+                else None,
+                finalized_events=len(session.events),
+                latest_chunk_latency_seconds=session.latest_chunk_latency_seconds,
+            )
+
     def finalize(self, session_id: str) -> list[StreamingASREvent]:
         """Flush the remaining decoder context exactly once."""
         session = self._get_session(session_id)
+        received_at = time.perf_counter()
         with session.lock:
             if session.closed:
                 return []
             decoder = self._decoder_for(session)
             try:
                 with self._inference_lock:
+                    inference_started_at = time.perf_counter()
                     text = decoder.flush()
+                    inference_ended_at = time.perf_counter()
             except Exception as exc:
                 raise WorkbenchError("Thai streaming ASR failed while finalising audio.") from exc
             session.closed = True
-            return self._record(session_id, session, text, is_final=True)
+            inference_seconds = inference_ended_at - inference_started_at
+            session.inference_seconds += inference_seconds
+            emitted_at = time.perf_counter()
+            return self._record(
+                session_id,
+                session,
+                text,
+                is_final=True,
+                timing={
+                    "finalize_received_at_monotonic_s": received_at,
+                    "inference_started_at_monotonic_s": inference_started_at,
+                    "inference_ended_at_monotonic_s": inference_ended_at,
+                    "event_emitted_at_monotonic_s": emitted_at,
+                    "finalization_latency_seconds": emitted_at - received_at,
+                    "inference_seconds": inference_seconds,
+                },
+            )
 
     def close_session(self, session_id: str) -> None:
         """Release application session state after finalisation or cancellation."""
