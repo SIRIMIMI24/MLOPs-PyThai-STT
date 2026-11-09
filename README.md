@@ -1,13 +1,41 @@
 # Thai Offline AI Workbench — Phase 5
 
-A local, CPU-first Thai NLP application using **PyThaiNLP** and **Gradio**.
-The workbench supports Thai normalization, word and sentence tokenization, local
-Thai TTS through PyThaiTTS Lunarlist ONNX, file ASR, and near-real-time local ASR.
-Local LLM uses a configured Ollama model through a loopback-only endpoint.
+> A privacy-first, CPU-first Thai AI workbench for local NLP, text-to-speech,
+> speech-to-text, speaker diarization, and local LLM chat.
 
-No GPU, NVIDIA/CUDA, WSL, Docker, or API key is required. TTS and ASR models are
-separate explicit setup downloads; normal runtime is cache-only.
+Thai Offline AI Workbench runs as a local Gradio application and keeps runtime
+text, audio, prompts, and generated results on the machine by default. It provides
+Thai normalization and tokenization through **PyThaiNLP**, local TTS through
+**PyThaiTTS Lunarlist ONNX**, file and near-real-time ASR through **PyThaiASR**,
+anonymous speaker diarization, and local LLM chat through loopback-only **Ollama**.
+No GPU, NVIDIA/CUDA, WSL, Docker, or cloud API key is required for the core app;
+TTS, ASR, and diarization model downloads are deliberate setup-time actions only.
 Python **3.10 (64-bit)** is the primary supported version.
+
+## Capabilities
+
+| Area | Local capability | Model loading behavior |
+| --- | --- | --- |
+| NLP | Thai normalization, word/sentence tokenization, character summary | Core dependency; no external model download |
+| TTS | Thai WAV synthesis using Lunarlist ONNX | Lazy, after explicit local model setup |
+| ASR | WAV/FLAC/MP3/OGG transcription, batch processing, and live browser capture | Lazy, after explicit local model setup |
+| Evaluation | Reproducible CER, WER, RTF, error analysis, and local reports | Uses the configured local ASR backend |
+| Diarization | Anonymous `SPEAKER_00`/`SPEAKER_01` turns and timestamp-based ASR composition | Lazy, after explicit local model setup |
+| Local LLM | Session-local chat via Ollama at `127.0.0.1` | Only on an explicit chat request |
+
+## Quick start
+
+Clone the repository, then follow the Windows setup below:
+
+```powershell
+git clone https://github.com/SIRIMIMI24/MLOPs-PyThai-STT.git
+Set-Location MLOPs-PyThai-STT
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\setup_windows.ps1
+.\.venv\Scripts\python.exe run_app.py
+```
+
+Open **http://127.0.0.1:7860**. The base installation enables NLP; TTS, ASR,
+diarization, and local LLM each require the explicit local setup described below.
 
 ## Windows: fresh folder to working NLP UI
 
