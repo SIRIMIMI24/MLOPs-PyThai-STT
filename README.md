@@ -284,6 +284,25 @@ The batch table exposes file name, status, duration, processing time, RTF, trans
 preview, and an error when one input cannot be processed. No model loads until a
 single-file, batch, or live request actually reaches ASR.
 
+## ASR performance benchmark
+
+The **Benchmark** tab measures wall-clock time for each local file through the
+actual ASR adapter boundary: local decode, mono/16 kHz normalization, and model
+inference. It reports per-file and aggregate real-time factor (RTF), where an RTF
+below `1.0` means processing completed faster than the source audio duration.
+Browser capture latency and transcript text are deliberately excluded from the
+benchmark report, and JSON/CSV reports remain below `outputs\\benchmarks`.
+
+Run the same measurement from the local CLI:
+
+```powershell
+.\.venv\Scripts\python.exe -m thai_offline_ai.cli benchmark-asr C:\Audio\sample.wav --model openthai2_asr --prompt th-mix
+```
+
+The first result can include local model initialization time; run a second pass if
+you need warm-cache inference timing. No model is downloaded, and no network call is
+made by this command.
+
 ## Phase 3.7: ASR Evaluation & Accuracy Lab
 
 The evaluation lab measures one current local ASR backend against verified ground

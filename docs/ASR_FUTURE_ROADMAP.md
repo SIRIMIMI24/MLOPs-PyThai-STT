@@ -13,8 +13,8 @@
 | 4 | Local LLM | Complete |
 | 5 | Speaker diarization | Complete |
 | 5.5 | Streaming ASR plus streaming diarization | Complete |
-| 6 | Local voice assistant | Not started |
-| 6.5 | Speech AI Continuous Improvement Lab: synthetic speech, pseudo-labeling, self-training, fine-tuning, experiment tracking, model promotion | Not started |
+| 6 | Local voice assistant | Complete |
+| 6.5 | Speech AI Continuous Improvement Lab: synthetic speech, pseudo-labeling, self-training, fine-tuning, experiment tracking, model promotion | Complete |
 | 7 | Conversation intelligence | Not started |
 | 8 | JARVIS Personal AI Agent: local visible browser agent, validated Local LLM orchestrator, voice-controlled assistant, SQLite memory, and 3-tier safety/approval controls (see `docs/JARVIS_PHASE8_SPEC.md`) | Implemented (Playwright optional setup) |
 

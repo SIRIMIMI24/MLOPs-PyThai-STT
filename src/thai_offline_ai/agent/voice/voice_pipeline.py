@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -11,10 +10,7 @@ from thai_offline_ai.adapters.tts import TTSAdapter
 from thai_offline_ai.agent.orchestrator import AgentOrchestrator
 from thai_offline_ai.agent.schemas import AgentResponse, OperatingMode
 from thai_offline_ai.errors import WorkbenchError
-
-_URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
-_MD_LINK_RE = re.compile(r"\[([^\]]+)\]\((https?://[^)]+)\)")
-_MD_SYMBOL_RE = re.compile(r"[*_`#>]+")
+from thai_offline_ai.voice_assistant import prepare_speech_text
 
 
 class WakeWordHook(Protocol):
@@ -29,19 +25,6 @@ class VoiceTurnResult:
     agent_response: AgentResponse
     audio_path: str | None = None
     tts_error: str | None = None
-
-
-def prepare_speech_text(answer: str, max_chars: int = 600) -> str:
-    """Convert Markdown/URL-heavy answers into clean spoken Thai/English sentences for TTS."""
-    text = _MD_LINK_RE.sub(r"\1", answer or "")
-    text = _URL_RE.sub("", text)
-    text = _MD_SYMBOL_RE.sub("", text)
-    lines = [line.strip(" -•\t") for line in text.splitlines() if line.strip()]
-    joined = " ".join(lines)
-    joined = re.sub(r"\s{2,}", " ", joined).strip()
-    if len(joined) > max_chars:
-        joined = joined[:max_chars].rsplit(" ", 1)[0].strip() + "..."
-    return joined
 
 
 class JarvisVoicePipeline:

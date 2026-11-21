@@ -21,7 +21,7 @@
 
 ## P2 — later
 - [x] True low-latency microphone streaming ASR (near-real-time CPU streaming ASR in Phase 3.5 + streaming speaker diarization in Phase 5.5).
-- [ ] Measured RTF/latency benchmark page.
+- [x] Measured RTF/latency benchmark page (local file ASR: decode + normalization + inference, with JSON/CSV export).
 - [ ] One-click model manager.
 - [ ] Portable desktop packaging.
 - [ ] Local RAG / embeddings.

@@ -41,7 +41,9 @@ def test_real_ui_construction_and_callback(tmp_path):
         assert demo.analytics_enabled is False
         assert not demo.config.get("stylesheets")
         tabs = [c["props"]["label"] for c in demo.config["components"] if c["type"] == "tabitem"]
-        assert tabs == ["Home", "NLP", "TTS", "ASR", "Local LLM", "JARVIS AI Assistant", "System"]
+        assert tabs == [
+            "Home", "NLP", "TTS", "ASR", "Benchmark", "Local LLM", "JARVIS AI Assistant", "System"
+        ]
         fn = next(key for key, value in demo.fns.items() if value.api_name == "analyze")
         result = asyncio.run(demo.process_api(fn, inputs=["ประเทศไทย"]))
         assert result["data"][0] == "ประเทศไทย"
@@ -386,6 +388,64 @@ def test_jarvis_ui_tab_is_lazy_and_handles_text_turn(tmp_path, monkeypatch):
         )
         assert res["data"][0][-1]["content"] == "สวัสดีครับ JARVIS พร้อมช่วยงานแล้ว"
         assert "Offline Mode" in res["data"][5]
+    finally:
+        demo.close()
+
+
+def test_phase6_voice_assistant_ui_callback_reuses_shared_adapters(tmp_path, monkeypatch):
+    from thai_offline_ai.asr_types import ASRResult
+
+    wav_in = tmp_path / "voice_in.wav"
+    wav_in.write_bytes(b"RIFF")
+    wav_out = tmp_path / "voice_out.wav"
+    wav_out.write_bytes(b"RIFF")
+
+    settings = Settings(app=AppConfig(output_dir=str(tmp_path)))
+    settings.asr.enabled = True
+    settings.llm.enabled = True
+    settings.tts.enabled = True
+
+    monkeypatch.setattr(
+        "thai_offline_ai.adapters.asr.ASRAdapter.transcribe_file",
+        lambda self, audio, *, model=None, prompt_mode=None: ASRResult(
+            text="สวัสดีผู้ช่วยเสียง", segments=[], duration=1.5, backend="openthai_onnx", model="openthai2_asr"
+        ),
+    )
+    monkeypatch.setattr(
+        "thai_offline_ai.adapters.llm.OllamaLocalLLM.chat",
+        lambda self, messages: LLMResult(text="สวัสดีครับ ยินดีช่วยเหลือครับ", backend="ollama", model=self.model),
+    )
+    monkeypatch.setattr(
+        TTSAdapter,
+        "synthesize",
+        lambda self, text, *, model=None, voice=None, speed=None: TTSResult(
+            audio_path=str(wav_out),
+            sample_rate=24000,
+            backend="kokoro_onnx",
+            model="kokoro_thai_onnx",
+            voice="f_young_bright",
+            speed=1.05,
+        ),
+    )
+    demo, _ = build_app(settings)
+    try:
+        fn = next(key for key, value in demo.fns.items() if value.api_name == "local_voice_chat")
+        res = asyncio.run(
+            demo.process_api(
+                fn,
+                inputs=[
+                    {"path": str(wav_in), "meta": {"_type": "gradio.FileData"}},
+                    "system",
+                    True,
+                    [],
+                ],
+                explicit_call=True,
+            )
+        )
+        assert res["data"][0][-1]["content"] == "สวัสดีครับ ยินดีช่วยเหลือครับ"
+        assert res["data"][2] == "สวัสดีผู้ช่วยเสียง"
+        assert "ตอบกลับด้วยเสียงสำเร็จ" in res["data"][4]
+        assert "Offline Voice" in res["data"][5]
     finally:
         demo.close()
 

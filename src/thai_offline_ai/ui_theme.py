@@ -1637,6 +1637,46 @@ def render_jarvis_approval_card(approval: Any | None = None) -> str:
     )
 
 
+def render_voice_latency_card(
+    metrics: Any | None = None,
+    *,
+    tts_error: str | None = None,
+) -> str:
+    """Render real measured stage-by-stage latency for Phase 6 Local Voice Assistant."""
+    if metrics is None:
+        return (
+            '<div class="aiw-audio-status">'
+            '<div class="aiw-audio-status-top">'
+            '<span class="aiw-pill aiw-pill-blue">Phase 6 · 100% Offline Voice-to-Voice</span>'
+            '<span style="font-size:12.5px;color:#64748B;">อัดเสียงหรืออัปโหลดไฟล์แล้วกด <strong>พูดคุยด้วยเสียง</strong> เพื่อวัดเวลาจริงทุกขั้นตอน</span>'
+            "</div></div>"
+        )
+    pills = [
+        f'<span class="aiw-pill aiw-pill-blue">ASR {metrics.asr_seconds:.2f}s ({escape(metrics.asr_model)})</span>',
+        f'<span class="aiw-pill aiw-pill-blue">LLM {metrics.llm_seconds:.2f}s ({escape(metrics.llm_model)})</span>',
+    ]
+    if metrics.tts_model:
+        voice_part = f" · {metrics.tts_voice}" if metrics.tts_voice else ""
+        pills.append(
+            f'<span class="aiw-pill aiw-pill-success">TTS {metrics.tts_seconds:.2f}s ({escape(metrics.tts_model)}{escape(voice_part)})</span>'
+        )
+    pills.append(f'<span class="aiw-pill">รวม {metrics.total_seconds:.2f}s</span>')
+    warn_html = (
+        f'<div style="font-size:12px;color:#B45309;">หมายเหตุ TTS: {escape(tts_error)}</div>'
+        if tts_error
+        else ""
+    )
+    return (
+        '<div class="aiw-audio-status aiw-audio-status-ready">'
+        '<div class="aiw-audio-status-top">'
+        '<span class="aiw-pill aiw-pill-success"><span class="aiw-dot"></span>ตอบกลับด้วยเสียงสำเร็จ (Offline)</span>'
+        "</div>"
+        f'<div class="aiw-audio-metrics">{"".join(pills)}</div>'
+        f"{warn_html}"
+        "</div>"
+    )
+
+
 def render_footer(settings: Settings) -> str:
     host_port = escape(f"http://{settings.app.host}:{settings.app.port}")
     return f"""

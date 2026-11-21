@@ -93,6 +93,9 @@ def test_loopback_communication_still_works():
 def test_local_redirect_cannot_send_request_to_external_host():
     class Redirect(BaseHTTPRequestHandler):
         def do_POST(self):
+            length = int(self.headers.get("Content-Length", "0"))
+            if length > 0:
+                self.rfile.read(length)
             self.send_response(307)
             self.send_header("Location", "https://example.com/inference")
             # Make the local redirect response self-delimiting on Windows so

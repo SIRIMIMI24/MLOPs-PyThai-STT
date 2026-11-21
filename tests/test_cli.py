@@ -6,6 +6,7 @@ import pytest
 
 from thai_offline_ai.adapters.tts import TTSResult
 from thai_offline_ai.batch import BatchASRResult
+from thai_offline_ai.benchmark import ASRBenchmarkResult
 from thai_offline_ai.cli import main
 from thai_offline_ai.llm_types import LLMResult
 
@@ -107,3 +108,16 @@ def test_mocked_batch_cli(monkeypatch, tmp_path, capsys):
     assert main(["asr-batch", str(tmp_path)]) == 0
     output = json.loads(capsys.readouterr().out)
     assert output["batch_id"] == "batch" and output["exports"]["csv"].endswith("result.csv")
+
+
+def test_mocked_benchmark_cli(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("THAI_AI_OUTPUT_DIR", str(tmp_path / "outputs"))
+    result = ASRBenchmarkResult("bench", 1.0, "openthai2_asr", "th-mix", 1, 1, 0, 2.0, 0.5, 0.25)
+    monkeypatch.setattr("thai_offline_ai.cli.ASRBenchmark.run", lambda *args, **kwargs: result)
+    monkeypatch.setattr(
+        "thai_offline_ai.cli.export_benchmark_result",
+        lambda *args: (tmp_path / "result.json", tmp_path / "result.csv"),
+    )
+    assert main(["benchmark-asr", str(tmp_path / "audio.wav"), "--model", "openthai2_asr"]) == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["benchmark_id"] == "bench" and output["aggregate_rtf"] == 0.25

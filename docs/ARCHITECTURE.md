@@ -40,6 +40,18 @@ Shared supporting modules preserve the existing boundaries:
   diarization (`StreamingDiarizationService`) and single-stream 16 kHz PCM fan-out
   (`StreamingSpeakerASRService`) populating `StreamingASREvent.speaker` without
   mutating raw ASR text or inferring business roles.
+- `voice_assistant.py` (Phase 6 — Local Voice Assistant): 100% offline voice-to-voice
+  service (`LocalVoiceAssistantService`) chaining the shared `ASRAdapter`,
+  loopback-only `OllamaLocalLLM`, and shared `TTSAdapter` with session-local history,
+  `prepare_speech_text()` normalization, and real stage-by-stage latency telemetry
+  (`VoiceAssistantMetrics`). See [`PHASE6_VOICE_ASSISTANT.md`](PHASE6_VOICE_ASSISTANT.md).
+- `speech_lab/` (Phase 6.5 — Speech AI Continuous Improvement Lab): governed local
+  data and experiment pipeline (`datasets.py` split separation & SHA-256 leakage guards,
+  `synthetic.py` local TTS + deterministic NumPy/SciPy audio augmentations,
+  `pseudo_label.py` teacher ASR + deterministic quality filters without fabricating
+  confidence, and `experiments.py` SQLite experiment tracking, training bundle export,
+  and anti-degradation promotion gate reusing the unchanged Phase 3.7 `ASREvaluator`).
+  See [`PHASE6_5_SPEECH_LAB.md`](PHASE6_5_SPEECH_LAB.md).
 - `agent/` (Phase 8 — JARVIS Personal AI Agent): additive agentic layer with
   `schemas.py`, `config.py`, `permissions.py` (3-tier approval & URL/prompt-injection
   guard), `memory.py` (local SQLite conversation + approved preferences store),

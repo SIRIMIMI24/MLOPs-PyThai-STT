@@ -16,6 +16,7 @@ from thai_offline_ai.agent.orchestrator import AgentOrchestrator
 from thai_offline_ai.agent.schemas import OperatingMode
 from thai_offline_ai.agent.voice.voice_pipeline import JarvisVoicePipeline
 from thai_offline_ai.batch import BatchASRProcessor, export_batch_result
+from thai_offline_ai.benchmark import ASRBenchmark, export_benchmark_result
 from thai_offline_ai.config import Settings, load_settings
 from thai_offline_ai.errors import WorkbenchError
 from thai_offline_ai.llm_types import ChatMessage
@@ -38,7 +39,9 @@ from thai_offline_ai.ui_theme import (
     render_page_header,
     render_system_cards,
     render_tts_audio_summary,
+    render_voice_latency_card,
 )
+from thai_offline_ai.voice_assistant import LocalVoiceAssistantService
 
 if TYPE_CHECKING:
     import gradio as gr
@@ -98,6 +101,7 @@ def build_app(settings: Settings | None = None) -> tuple[gr.Blocks, Settings]:
         settings, asr_service=streaming_service
     )
     batch_processor = BatchASRProcessor(settings, adapter=asr_adapter)
+    asr_benchmark = ASRBenchmark(settings, adapter=asr_adapter)
     agent_settings = load_agent_settings()
     agent_settings.memory.db_path = str(Path(settings.app.output_dir) / "jarvis_memory.db")
     agent_settings.browser.profile_dir = str(
@@ -110,6 +114,21 @@ def build_app(settings: Settings | None = None) -> tuple[gr.Blocks, Settings]:
         tts_adapter=tts_adapter,
         max_tts_chars=agent_settings.voice.max_tts_chars,
     )
+    voice_assistant = LocalVoiceAssistantService(
+        settings,
+        asr_adapter=asr_adapter,
+        tts_adapter=tts_adapter,
+    )
+    from thai_offline_ai.speech_lab.experiments import ExperimentRegistry
+    from thai_offline_ai.speech_lab.synthetic import (
+        AUGMENTATION_PRESETS,
+        SyntheticCorpusItem,
+        SyntheticSpeechGenerator,
+    )
+
+    speech_lab_dir = Path(settings.app.output_dir) / "speech_lab"
+    speech_lab_registry = ExperimentRegistry(speech_lab_dir / "experiments.db")
+    synthetic_generator = SyntheticSpeechGenerator(settings, tts_adapter=tts_adapter)
     active_asr = {
         "model": settings.asr.model or "typhoon_asr",
         "prompt": settings.asr.openthai_prompt,
@@ -124,6 +143,34 @@ def build_app(settings: Settings | None = None) -> tuple[gr.Blocks, Settings]:
                 f"({settings.asr.openthai_precision}, prompt={prompt_choice})"
             )
         return "กำลังเลือก: Typhoon ASR (PyThaiASR ONNX)"
+
+    def benchmark_asr_ui(
+        files: list[str] | None, model_choice: str, prompt_choice: str
+    ) -> tuple[list[list[object]], str, str | None, str | None]:
+        """Measure one local ASR adapter path without retaining transcript text."""
+        try:
+            result = asr_benchmark.run(files or [], model=model_choice, prompt_mode=prompt_choice)
+            json_path, csv_path = export_benchmark_result(result, settings)
+            rows = [
+                [
+                    item.file_name,
+                    item.status,
+                    f"{item.audio_seconds:.3f}" if item.audio_seconds is not None else "-",
+                    f"{item.elapsed_seconds:.3f}" if item.elapsed_seconds is not None else "-",
+                    f"{item.rtf:.3f}" if item.rtf is not None else "-",
+                    item.error or "",
+                ]
+                for item in result.items
+            ]
+            aggregate = f"{result.aggregate_rtf:.3f}" if result.aggregate_rtf is not None else "n/a"
+            summary = (
+                f"Measured locally · {result.succeeded}/{result.total_files} succeeded · "
+                f"audio {result.total_audio_seconds:.2f}s · elapsed {result.total_elapsed_seconds:.2f}s · "
+                f"aggregate RTF {aggregate}. RTF < 1 means processing faster than source duration."
+            )
+            return rows, summary, str(json_path), str(csv_path)
+        except WorkbenchError as exc:
+            raise gr.Error(str(exc)) from None
 
     def analyze(text: str) -> tuple[str, list[str], list[str], int, str]:
         try:
@@ -557,7 +604,40 @@ def build_app(settings: Settings | None = None) -> tuple[gr.Blocks, Settings]:
             raise gr.Error(str(exc)) from None
 
     def clear_local_chat() -> tuple[list[dict[str, str]], str, str]:
+        voice_assistant.clear_session("local-llm-ui")
         return [], "", "Cleared local chat history."
+
+    def send_local_voice_chat(
+        audio_file: str | None,
+        system_prompt: str,
+        speak_reply: bool,
+        history: list[dict[str, str]] | None,
+    ):
+        try:
+            turn = voice_assistant.process_audio_turn(
+                "local-llm-ui",
+                audio_file,
+                system_prompt=system_prompt,
+                external_history=history or [],
+                speak_response=bool(speak_reply),
+                asr_model=active_asr["model"],
+                asr_prompt=active_asr["prompt"],
+            )
+            m = turn.metrics
+            status_line = (
+                f"Offline Voice · ASR {m.asr_seconds:.2f}s · LLM {m.llm_seconds:.2f}s · "
+                f"TTS {m.tts_seconds:.2f}s · Total {m.total_seconds:.2f}s"
+            )
+            return (
+                turn.history,
+                turn.history,
+                turn.transcript,
+                turn.audio_path,
+                render_voice_latency_card(m, tts_error=turn.tts_error),
+                status_line,
+            )
+        except (WorkbenchError, ValueError) as exc:
+            raise gr.Error(str(exc)) from None
 
     readiness = collect_ui_readiness(settings)
     playwright_ready = bool(readiness.get("playwright_ready"))
@@ -783,6 +863,55 @@ def build_app(settings: Settings | None = None) -> tuple[gr.Blocks, Settings]:
         deleted = jarvis_orchestrator.memory.delete_memory(key)
         msg = f"ลบความจำ '{key.strip()}' แล้ว" if deleted else f"ไม่พบความจำชื่อ '{key.strip()}'"
         return jarvis_list_memories(), msg
+
+    def lab_generate_synthetic_ui(
+        corpus_text: str, profile_names: list[str] | None, dataset_id: str
+    ) -> tuple[str, str]:
+        try:
+            lines = [line.strip() for line in (corpus_text or "").splitlines() if line.strip()]
+            if not lines:
+                raise WorkbenchError("พิมพ์ข้อความอย่างน้อย 1 บรรทัดเพื่อสร้างข้อมูลเสียงสังเคราะห์")
+            selected = profile_names or ["clean"]
+            augs = [AUGMENTATION_PRESETS[name] for name in selected if name in AUGMENTATION_PRESETS]
+            if not augs:
+                augs = [AUGMENTATION_PRESETS["clean"]]
+            clean_id = (dataset_id or "synthetic_ui").strip().replace(" ", "_")
+            items = [
+                SyntheticCorpusItem(sample_id=f"{clean_id}_{i:03d}", text=line)
+                for i, line in enumerate(lines, start=1)
+            ]
+            summary = synthetic_generator.generate_dataset(
+                items,
+                dataset_id=clean_id,
+                dataset_version="v1",
+                output_dir=speech_lab_dir / "synthetic" / clean_id,
+                augmentations=augs,
+            )
+            info = (
+                f"สร้างเสียงสังเคราะห์สำเร็จ {summary.generated_count} ไฟล์ "
+                f"(fingerprint={summary.manifest.fingerprint})\n"
+                f"Manifest: {summary.manifest_path}"
+            )
+            return info, str(summary.manifest_path)
+        except WorkbenchError as exc:
+            raise gr.Error(str(exc)) from None
+
+    def lab_list_experiments_ui() -> list[list[str]]:
+        rows: list[list[str]] = []
+        for exp in speech_lab_registry.list_experiments(limit=30):
+            rows.append(
+                [
+                    exp.experiment_id,
+                    exp.candidate_model,
+                    f"{exp.eval_dataset_id} ({exp.eval_split})",
+                    f"{exp.cer:.4f}" if exp.cer is not None else "-",
+                    f"{exp.wer:.4f}" if exp.wer is not None else "-",
+                    f"{exp.rtf:.2f}x" if exp.rtf is not None else "-",
+                    exp.real_synthetic_ratio,
+                    exp.promotion_status,
+                ]
+            )
+        return rows
 
     tts_badges: list[tuple[str, str]] = []
     if settings.tts.enabled:
@@ -1301,6 +1430,109 @@ def build_app(settings: Settings | None = None) -> tuple[gr.Blocks, Settings]:
                     concurrency_limit=1,
                 )
 
+            with gr.Accordion(
+                "Speech AI Continuous Improvement Lab (Phase 6.5 · Synthetic Data & Experiment Registry)",
+                open=False,
+            ):
+                gr.Markdown(
+                    "สร้างชุดเสียงสังเคราะห์พร้อม Augmentation (`train_synthetic` เท่านั้น ห้ามปน `validation_real`/`test_real`) "
+                    "และติดตามผล Experiment / Promotion Gate บนชุดข้อมูลจริงที่คงเดิม"
+                )
+                with gr.Row(equal_height=False):
+                    with gr.Column(scale=6):
+                        lab_dataset_id = gr.Textbox(
+                            label="ชื่อชุดข้อมูลสังเคราะห์ (Dataset ID)",
+                            value="thai_domain_synth",
+                        )
+                        lab_corpus = gr.Textbox(
+                            label="ข้อความต้นฉบับสำหรับสร้างเสียงสังเคราะห์ (1 ประโยคต่อบรรทัด)",
+                            placeholder="สวัสดีครับ ขอสอบถามเรื่องต่ออายุกรมธรรม์ประกันภัย\nยืนยันนัดชำระค่าเบี้ยประกันผ่านแอปครับ",
+                            lines=4,
+                            interactive=settings.tts.enabled,
+                        )
+                        lab_profiles = gr.CheckboxGroup(
+                            label="โปรไฟล์ Augmentation",
+                            choices=list(AUGMENTATION_PRESETS.keys()),
+                            value=["clean", "telephone_bandpass"],
+                            interactive=settings.tts.enabled,
+                        )
+                        lab_gen_btn = gr.Button(
+                            "สร้างชุดเสียงสังเคราะห์ (Generate Synthetic Manifest)",
+                            variant="primary",
+                            interactive=settings.tts.enabled,
+                        )
+                        lab_gen_status = gr.Textbox(label="ผลลัพธ์ Synthetic Lab", lines=3, interactive=False)
+                        lab_manifest_file = gr.File(label="ดาวน์โหลด Manifest JSONL", interactive=False)
+                    with gr.Column(scale=6):
+                        lab_exp_refresh = gr.Button(
+                            "รีเฟรชตาราง Experiment & Promotion Gate", variant="secondary"
+                        )
+                        lab_exp_table = gr.Dataframe(
+                            headers=[
+                                "Experiment ID",
+                                "Model",
+                                "Holdout Eval",
+                                "CER",
+                                "WER",
+                                "RTF",
+                                "Real:Synth",
+                                "Status",
+                            ],
+                            datatype=["str"] * 8,
+                            value=[],
+                            interactive=False,
+                            label="ASR Experiment Registry",
+                        )
+                lab_gen_btn.click(
+                    lab_generate_synthetic_ui,
+                    [lab_corpus, lab_profiles, lab_dataset_id],
+                    [lab_gen_status, lab_manifest_file],
+                    api_name="lab_generate_synthetic",
+                    concurrency_limit=1,
+                )
+                lab_exp_refresh.click(
+                    lab_list_experiments_ui,
+                    outputs=lab_exp_table,
+                    api_name="lab_list_experiments",
+                )
+
+        with gr.Tab("Benchmark"):
+            gr.HTML(
+                render_page_header(
+                    "Local ASR Performance Benchmark",
+                    "วัดเวลา decode + normalize + ASR inference จริงบนเครื่องนี้; ไม่วัด browser capture latency และไม่เก็บ transcript ในรายงาน",
+                    badges=[("Local-only", "success"), ("Measured RTF", "blue")],
+                )
+            )
+            with gr.Column(elem_classes=["aiw-panel"]):
+                benchmark_files = gr.File(
+                    label="ไฟล์เสียงสำหรับวัดผล (WAV/FLAC/MP3/OGG)",
+                    file_count="multiple",
+                    type="filepath",
+                    file_types=["audio"],
+                    interactive=settings.asr.enabled,
+                )
+                benchmark_button = gr.Button(
+                    "วัด ASR RTF / Latency", variant="primary", interactive=settings.asr.enabled
+                )
+                benchmark_summary = gr.Textbox(label="สรุปผลที่วัดได้", interactive=False, lines=3)
+                benchmark_table = gr.Dataframe(
+                    headers=["File", "Status", "Audio (s)", "Elapsed (s)", "RTF", "Error"],
+                    datatype=["str"] * 6,
+                    interactive=False,
+                    label="รายละเอียดการวัด",
+                )
+                with gr.Row():
+                    benchmark_json = gr.File(label="รายงาน JSON", interactive=False)
+                    benchmark_csv = gr.File(label="รายงาน CSV", interactive=False)
+                benchmark_button.click(
+                    benchmark_asr_ui,
+                    [benchmark_files, asr_model_choice, asr_prompt_choice],
+                    [benchmark_table, benchmark_summary, benchmark_json, benchmark_csv],
+                    api_name="benchmark_asr",
+                    concurrency_limit=1,
+                )
+
         with gr.Tab("Local LLM"):
             gr.HTML(
                 render_page_header(
@@ -1339,6 +1571,51 @@ def build_app(settings: Settings | None = None) -> tuple[gr.Blocks, Settings]:
                         scale=3,
                     )
                 llm_status = gr.Textbox(label="สถานะ Local LLM", interactive=False)
+                with gr.Accordion(
+                    "Local Voice Assistant (Phase 6 · 100% Offline Voice-to-Voice)",
+                    open=False,
+                ):
+                    gr.Markdown(
+                        "คุยด้วยเสียงแบบออฟไลน์ 100% โดยตรง (`ASR → Local LLM → TTS`) "
+                        "ใช้โมเดลเดิมร่วมกันโดยไม่โหลดซ้ำ พร้อมวัดเวลาจริงแต่ละขั้นตอน"
+                    )
+                    with gr.Row(equal_height=False):
+                        with gr.Column(scale=6):
+                            va_mic = gr.Audio(
+                                label="ไมโครโฟน / ไฟล์เสียง (Local Voice Assistant)",
+                                sources=["microphone", "upload"],
+                                type="filepath",
+                                interactive=settings.llm.enabled and settings.asr.enabled,
+                            )
+                            va_speak = gr.Checkbox(
+                                label="ตอบกลับเป็นเสียง (TTS)",
+                                value=settings.tts.enabled,
+                                interactive=settings.tts.enabled,
+                            )
+                            va_send = gr.Button(
+                                "พูดคุยด้วยเสียง (Voice Chat)",
+                                variant="primary",
+                                interactive=settings.llm.enabled and settings.asr.enabled,
+                            )
+                        with gr.Column(scale=6):
+                            va_transcript = gr.Textbox(
+                                label="ข้อความที่ถอดเสียง (Voice Input)",
+                                lines=2,
+                                interactive=False,
+                            )
+                            va_audio = gr.Audio(
+                                label="เสียงตอบกลับ (Voice Assistant Reply)",
+                                type="filepath",
+                                interactive=False,
+                                show_download_button=True,
+                                show_share_button=False,
+                                waveform_options=gr.WaveformOptions(
+                                    waveform_color="#93C5FD",
+                                    waveform_progress_color="#2563EB",
+                                    show_controls=True,
+                                ),
+                            )
+                            va_latency = gr.HTML(render_voice_latency_card())
             llm_send.click(
                 send_local_chat,
                 [llm_message, llm_system, llm_history],
@@ -1346,6 +1623,13 @@ def build_app(settings: Settings | None = None) -> tuple[gr.Blocks, Settings]:
                 api_name="local_llm_chat",
                 concurrency_limit=1,
             ).then(lambda history: history, llm_chat, llm_history)
+            va_send.click(
+                send_local_voice_chat,
+                [va_mic, llm_system, va_speak, llm_history],
+                [llm_chat, llm_history, va_transcript, va_audio, va_latency, llm_status],
+                api_name="local_voice_chat",
+                concurrency_limit=1,
+            )
             llm_clear.click(
                 clear_local_chat,
                 outputs=[llm_chat, llm_message, llm_status],
