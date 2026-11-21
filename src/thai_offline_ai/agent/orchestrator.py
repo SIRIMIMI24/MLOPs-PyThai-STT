@@ -31,6 +31,7 @@ from thai_offline_ai.agent.tool_registry import ToolRegistry, register_core_loca
 from thai_offline_ai.config import Settings
 from thai_offline_ai.errors import WorkbenchError
 from thai_offline_ai.llm_types import ChatMessage, LLMResult
+from thai_offline_ai.local_rag import LocalRAGStore
 
 
 class LLMChatClient(Protocol):
@@ -65,17 +66,19 @@ class AgentOrchestrator:
         llm_client: LLMChatClient | None = None,
         browser: BrowserSessionBackend | None = None,
         memory: AgentMemoryStore | None = None,
+        rag_store: LocalRAGStore | None = None,
     ) -> None:
         self.workbench_settings = workbench_settings
         self.agent_settings = agent_settings or load_agent_settings()
         self._llm_client = llm_client
         self.memory = memory or AgentMemoryStore(self.agent_settings.memory.db_path)
+        self.rag_store = rag_store
         self.browser: BrowserSessionBackend = browser or PlaywrightBrowserManager(
             self.agent_settings.browser
         )
         self.guard = PermissionGuard(self.agent_settings.safety)
         self.registry = ToolRegistry()
-        register_core_local_tools(self.registry, self.memory)
+        register_core_local_tools(self.registry, self.memory, rag_store=self.rag_store)
         register_browser_tools(
             self.registry,
             self.browser,

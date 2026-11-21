@@ -16,9 +16,11 @@ from thai_offline_ai.agent.schemas import (
     MemorySaveArgs,
     MemorySearchArgs,
     OperatingMode,
+    RAGSearchArgs,
     ToolResult,
 )
 from thai_offline_ai.errors import WorkbenchError
+from thai_offline_ai.local_rag import LocalRAGStore
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,8 +101,12 @@ class ToolRegistry:
         return "\n".join(lines)
 
 
-def register_core_local_tools(registry: ToolRegistry, memory: AgentMemoryStore) -> None:
-    """Register local-only utility & SQLite memory tools."""
+def register_core_local_tools(
+    registry: ToolRegistry,
+    memory: AgentMemoryStore,
+    rag_store: LocalRAGStore | None = None,
+) -> None:
+    """Register local-only utility, SQLite memory, and optional Local RAG tools."""
 
     def handle_datetime(_args: GetCurrentDatetimeArgs) -> ToolResult:
         now = datetime.now().astimezone()
@@ -145,6 +151,28 @@ def register_core_local_tools(registry: ToolRegistry, memory: AgentMemoryStore) 
             data={"key": rec.key, "value": rec.value, "category": rec.category},
         )
 
+    def handle_rag_search(args: RAGSearchArgs) -> ToolResult:
+        if rag_store is None:
+            return ToolResult(
+                tool_name="rag_search",
+                ok=True,
+                summary="Local RAG store is not configured.",
+                data={"matches": []},
+            )
+        matches = rag_store.search(args.query, top_k=args.top_k)
+        payload = [m.to_dict() for m in matches]
+        summary = (
+            f"Retrieved {len(payload)} local RAG chunk(s) for '{args.query}'."
+            if payload
+            else f"No local RAG documents matched '{args.query}'."
+        )
+        return ToolResult(
+            tool_name="rag_search",
+            ok=True,
+            summary=summary,
+            data={"matches": payload},
+        )
+
     registry.register(
         name="get_current_datetime",
         description="Get the current local date, time, and day of week on the user's computer.",
@@ -164,5 +192,12 @@ def register_core_local_tools(registry: ToolRegistry, memory: AgentMemoryStore) 
         description="Save a durable user preference or non-sensitive fact to local SQLite memory (requires user approval).",
         args_model=MemorySaveArgs,
         handler=handle_memory_save,
+        requires_online=False,
+    )
+    registry.register(
+        name="rag_search",
+        description="Search ingested local documents (TXT, MD, CSV, JSON, HTML) in the offline Local RAG knowledge base.",
+        args_model=RAGSearchArgs,
+        handler=handle_rag_search,
         requires_online=False,
     )

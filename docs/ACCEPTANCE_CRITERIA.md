@@ -22,9 +22,9 @@
 ## P2 — later
 - [x] True low-latency microphone streaming ASR (near-real-time CPU streaming ASR in Phase 3.5 + streaming speaker diarization in Phase 5.5).
 - [x] Measured RTF/latency benchmark page (local file ASR: decode + normalization + inference, with JSON/CSV export).
-- [ ] One-click model manager.
-- [ ] Portable desktop packaging.
-- [ ] Local RAG / embeddings.
+- [x] One-click model manager (local cache inspector + explicit setup-mode child-process installer in UI and CLI).
+- [x] Portable desktop packaging (`start_workbench.bat` one-click launcher + `build_portable_bundle` generator).
+- [x] Local RAG / embeddings (100% offline SQLite + hybrid PyThaiNLP word/char n-gram TF-IDF retrieval, grounded Local LLM Q&A, and JARVIS `rag_search` tool).
 
 ## Test policy
 Unit tests must monkeypatch optional model libraries. Integration tests that require real models should be opt-in and marked clearly.

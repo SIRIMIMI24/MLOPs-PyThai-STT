@@ -131,6 +131,7 @@ class PermissionGuard:
         if tool_name in {
             "get_current_datetime",
             "memory_search",
+            "rag_search",
             "browser_get_tabs",
             "browser_close",
             "browser_scroll",

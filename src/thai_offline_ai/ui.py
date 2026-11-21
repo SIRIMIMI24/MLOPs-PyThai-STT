@@ -26,6 +26,9 @@ from thai_offline_ai.conversation_intel import (
 from thai_offline_ai.conversation_intel import export_report as export_conversation_report
 from thai_offline_ai.errors import WorkbenchError
 from thai_offline_ai.llm_types import ChatMessage
+from thai_offline_ai.local_rag import LocalRAGStore
+from thai_offline_ai.model_manager import ModelManager
+from thai_offline_ai.packaging import build_portable_bundle
 from thai_offline_ai.runtime import prepare_runtime
 from thai_offline_ai.speaker_composition import compose_speaker_transcript
 from thai_offline_ai.streaming import StreamingASRService
@@ -113,7 +116,13 @@ def build_app(settings: Settings | None = None) -> tuple[gr.Blocks, Settings]:
     agent_settings.browser.profile_dir = str(
         Path(settings.app.output_dir) / "jarvis_browser_profile"
     )
-    jarvis_orchestrator = AgentOrchestrator(settings, agent_settings)
+    local_rag_store = LocalRAGStore(
+        Path(settings.app.output_dir) / "local_rag.db", settings=settings
+    )
+    model_manager = ModelManager(settings)
+    jarvis_orchestrator = AgentOrchestrator(
+        settings, agent_settings, rag_store=local_rag_store
+    )
     jarvis_voice = JarvisVoicePipeline(
         jarvis_orchestrator,
         asr_adapter=asr_adapter,
@@ -200,6 +209,72 @@ def build_app(settings: Settings | None = None) -> tuple[gr.Blocks, Settings]:
         # Metadata/discovery only in UI; the doctor command also checks required imports.
         checks = collect_diagnostics(settings, check_imports=False)
         return render_system_cards(checks, settings), format_report(checks)
+
+    def list_managed_models_ui() -> list[list[str]]:
+        return model_manager.to_table_rows()
+
+    def install_managed_model_ui(
+        model_key: str, allow_setup: bool
+    ) -> tuple[list[list[str]], str]:
+        try:
+            res = model_manager.run_setup(model_key, allow_setup_network=bool(allow_setup))
+            msg = (
+                f"ติดตั้ง '{res['key']}' สำเร็จ (ready={res['ready']}, size={res['size_mb']:.1f} MB)\n"
+                f"{res['output']}"
+            )
+            return model_manager.to_table_rows(), msg
+        except WorkbenchError as exc:
+            raise gr.Error(str(exc)) from None
+
+    def create_portable_bundle_ui() -> str:
+        res = build_portable_bundle(settings)
+        return (
+            f"สร้างชุด Portable Desktop Bundle สำเร็จ: {res.bundle_dir}\n"
+            f"Launcher: {res.launcher_bat}\n"
+            f"Manifest: {res.manifest_path}"
+        )
+
+    def rag_list_docs_ui() -> list[list[str]]:
+        return [
+            [d.doc_id, d.title, str(d.chunk_count), str(d.char_count), d.created_at]
+            for d in local_rag_store.list_documents()
+        ]
+
+    def rag_ingest_ui(
+        files: list[str] | None, inline_title: str, inline_text: str
+    ) -> tuple[list[list[str]], str]:
+        try:
+            ingested = []
+            if files:
+                ingested.extend(local_rag_store.ingest_files(files))
+            if (inline_text or "").strip():
+                ingested.append(
+                    local_rag_store.ingest_text(
+                        inline_title or "ข้อความที่วาง", inline_text
+                    )
+                )
+            if not ingested:
+                raise WorkbenchError("เลือกไฟล์เอกสาร หรือพิมพ์ข้อความก่อนกดนำเข้า Local RAG")
+            total_chunks = sum(item.chunk_count for item in ingested)
+            return (
+                rag_list_docs_ui(),
+                f"นำเข้าสำเร็จ {len(ingested)} เอกสาร (รวม {total_chunks} chunks)",
+            )
+        except WorkbenchError as exc:
+            raise gr.Error(str(exc)) from None
+
+    def rag_ask_ui(question: str, use_llm: bool) -> tuple[str, list[dict[str, Any]]]:
+        try:
+            ans = local_rag_store.ask(
+                question, top_k=4, use_llm=bool(use_llm and settings.llm.enabled)
+            )
+            return ans.answer, [m.to_dict() for m in ans.matches]
+        except WorkbenchError as exc:
+            raise gr.Error(str(exc)) from None
+
+    def rag_clear_ui() -> tuple[list[list[str]], str]:
+        local_rag_store.clear_all()
+        return [], "ล้างฐานความรู้ Local RAG ทั้งหมดแล้ว"
 
     def conversation_intel_ui(
         audio: str | None, pasted: str, terms_text: str, use_llm: bool
@@ -1698,6 +1773,72 @@ def build_app(settings: Settings | None = None) -> tuple[gr.Blocks, Settings]:
                                 ),
                             )
                             va_latency = gr.HTML(render_voice_latency_card())
+                with gr.Accordion(
+                    "Local RAG Knowledge Base (ค้นหาและถาม-ตอบเอกสารในเครื่อง · 100% Offline)",
+                    open=False,
+                ):
+                    gr.Markdown(
+                        "นำเข้าเอกสาร `.txt`, `.md`, `.csv`, `.json`, `.html` หรือวางข้อความลงฐานข้อมูล SQLite ในเครื่อง "
+                        "(ค้นหาด้วย Hybrid PyThaiNLP Word + Character n-gram TF-IDF โดยไม่ต้องดาวน์โหลดโมเดล Embedding)"
+                    )
+                    with gr.Row(equal_height=False):
+                        with gr.Column(scale=5):
+                            rag_files = gr.File(
+                                label="อัปโหลดไฟล์เอกสาร (TXT, MD, CSV, JSON, HTML)",
+                                file_count="multiple",
+                                type="filepath",
+                            )
+                            rag_title = gr.Textbox(
+                                label="ชื่อเอกสาร (กรณีวางข้อความ)",
+                                placeholder="เช่น คู่มือกรมธรรม์ประกันภัย",
+                            )
+                            rag_text = gr.Textbox(
+                                label="เนื้อหาเอกสาร (วางข้อความ)",
+                                lines=3,
+                                placeholder="วางเนื้อหาภาษาไทยหรืออังกฤษที่ต้องการให้ค้นหาและถาม-ตอบ...",
+                            )
+                            with gr.Row():
+                                rag_ingest_btn = gr.Button("นำเข้าเอกสาร (Ingest)", variant="primary")
+                                rag_clear_btn = gr.Button("ล้างเอกสารทั้งหมด", variant="secondary")
+                            rag_status = gr.Textbox(label="สถานะ Local RAG", interactive=False)
+                        with gr.Column(scale=7):
+                            rag_docs_table = gr.Dataframe(
+                                headers=["Doc ID", "Title", "Chunks", "Chars", "Created"],
+                                datatype=["str"] * 5,
+                                value=[],
+                                interactive=False,
+                                label="เอกสารในฐานความรู้ (Indexed Documents)",
+                            )
+                            rag_question = gr.Textbox(
+                                label="คำถามค้นหาในเอกสาร (RAG Question)",
+                                placeholder="พิมพ์คำถามที่ต้องการค้นคำตอบจากเอกสารที่นำเข้า...",
+                            )
+                            rag_use_llm = gr.Checkbox(
+                                label="สรุปคำตอบด้วย Local LLM พร้อมอ้างอิง [Doc #1]",
+                                value=settings.llm.enabled,
+                                interactive=settings.llm.enabled,
+                            )
+                            rag_ask_btn = gr.Button("ค้นหาและถามคำตอบ (Ask RAG)", variant="primary")
+                            rag_answer = gr.Textbox(label="คำตอบจากเอกสาร", lines=5, interactive=False)
+                            with gr.Accordion("ชิ้นส่วนเอกสารที่ค้นพบ (Retrieved Chunks)", open=False):
+                                rag_chunks_json = gr.JSON(label="Top Matched Chunks", value=[])
+            rag_ingest_btn.click(
+                rag_ingest_ui,
+                [rag_files, rag_title, rag_text],
+                [rag_docs_table, rag_status],
+                api_name="rag_ingest",
+            )
+            rag_clear_btn.click(
+                rag_clear_ui,
+                outputs=[rag_docs_table, rag_status],
+                api_name="rag_clear",
+            )
+            rag_ask_btn.click(
+                rag_ask_ui,
+                [rag_question, rag_use_llm],
+                [rag_answer, rag_chunks_json],
+                api_name="rag_ask",
+            )
             llm_send.click(
                 send_local_chat,
                 [llm_message, llm_system, llm_history],
@@ -1946,7 +2087,49 @@ def build_app(settings: Settings | None = None) -> tuple[gr.Blocks, Settings]:
                 )
                 with gr.Accordion("รายงานแบบละเอียด (Raw Doctor Report)", open=False):
                     status = gr.Textbox(label="สถานะระบบ", lines=22, interactive=False)
+                with gr.Accordion(
+                    "One-Click Model Manager & Portable Desktop Packaging", open=False
+                ):
+                    gr.Markdown(
+                        "ตรวจสอบขนาดและสถานะแคชโมเดลทั้งหมดในเครื่อง การดาวน์โหลดจะทำงานเฉพาะเมื่อติ๊กเปิด **Setup Mode** เท่านั้น"
+                    )
+                    mm_refresh_btn = gr.Button("ตรวจสอบสถานะโมเดล (Inspect Model Caches)", variant="secondary")
+                    mm_table = gr.Dataframe(
+                        headers=["Model Key", "Category", "Status", "Cache Size", "Detail", "Setup Command"],
+                        datatype=["str"] * 6,
+                        value=model_manager.to_table_rows(),
+                        interactive=False,
+                        label="Managed Local Models",
+                    )
+                    with gr.Row():
+                        mm_choice = gr.Dropdown(
+                            label="เลือกโมเดลที่ต้องการติดตั้ง/อัปเดต",
+                            choices=list(ModelManager.SCRIPT_MAP.keys()),
+                            value="kokoro_thai_onnx",
+                            scale=3,
+                        )
+                        mm_allow_net = gr.Checkbox(
+                            label="เปิด Setup Mode (อนุญาตดาวน์โหลดโมเดล)",
+                            value=False,
+                            scale=2,
+                        )
+                        mm_install_btn = gr.Button("ติดตั้งโมเดลที่เลือก", variant="primary", scale=2)
+                    with gr.Row():
+                        mm_package_btn = gr.Button(
+                            "สร้างชุด Portable Desktop Bundle (.bat)", variant="secondary"
+                        )
+                    mm_status = gr.Textbox(label="ผลลัพธ์ Model Manager / Packaging", lines=4, interactive=False)
             refresh.click(system_status, outputs=[system_cards, status], api_name="system_status")
+            mm_refresh_btn.click(list_managed_models_ui, outputs=mm_table, api_name="models_list")
+            mm_install_btn.click(
+                install_managed_model_ui,
+                [mm_choice, mm_allow_net],
+                [mm_table, mm_status],
+                api_name="models_install",
+            )
+            mm_package_btn.click(
+                create_portable_bundle_ui, outputs=mm_status, api_name="package_portable"
+            )
         gr.HTML(render_footer(settings))
     return demo, settings
 

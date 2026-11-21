@@ -49,6 +49,11 @@ Shared supporting modules preserve the existing boundaries:
   stats, keywords and domain-term hits plus optional local-LLM summary / decisions / action
   items that are schema-validated and grounded to real utterance indexes (no inferred roles).
   See [`PHASE7_CONVERSATION_INTELLIGENCE.md`](PHASE7_CONVERSATION_INTELLIGENCE.md).
+- `local_rag.py`, `model_manager.py`, and `packaging.py` (P2 Platform Completeness):
+  100% offline SQLite document chunking & hybrid Thai/English TF-IDF retrieval
+  (`LocalRAGStore`, also exposed to JARVIS via `rag_search`), local model cache inspector
+  with explicit setup-mode child-process installer (`ModelManager`), and Windows portable
+  desktop launcher bundle generator (`build_portable_bundle` + `start_workbench.bat`).
 - `speech_lab/` (Phase 6.5 — Speech AI Continuous Improvement Lab): governed local
   data and experiment pipeline (`datasets.py` split separation & SHA-256 leakage guards,
   `synthetic.py` local TTS + deterministic NumPy/SciPy audio augmentations,

@@ -95,6 +95,15 @@ class MemorySaveArgs(BaseModel):
     )
 
 
+class RAGSearchArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    query: str = Field(
+        ..., min_length=1, max_length=300, description="Search query for local RAG documents."
+    )
+    top_k: int = Field(default=4, ge=1, le=10, description="Maximum document chunks to retrieve.")
+
+
 class ToolCall(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

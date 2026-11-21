@@ -161,6 +161,23 @@ def build_parser() -> argparse.ArgumentParser:
     ci.add_argument("--no-llm", action="store_true", help="Deterministic analytics only")
     ci.add_argument("--model", help="ASR model: typhoon_asr or openthai2_asr")
     ci.add_argument("--prompt", choices=("th-TH", "th-mix"), help="OpenThai2.0 prompt mode")
+    mm = sub.add_parser("models", help="Inspect or explicitly install local model caches")
+    mm.add_argument("--install", choices=(
+        "kokoro_thai_onnx",
+        "lunarlist_onnx",
+        "openthai2_asr",
+        "typhoon_asr",
+        "nemotron_diarization",
+        "playwright_chromium",
+    ), help="Model key to install via its verified setup script")
+    mm.add_argument("--setup-mode", action="store_true", help="Explicitly authorize setup-time download")
+    rag = sub.add_parser("rag", help="Ingest or query local documents in the offline Local RAG store")
+    rag.add_argument("--ingest", nargs="+", help="One or more local document paths to index")
+    rag.add_argument("--search", help="Search query to retrieve top chunks without LLM")
+    rag.add_argument("--ask", help="Question to answer from local documents")
+    rag.add_argument("--no-llm", action="store_true", help="Use extractive fallback instead of Ollama")
+    rag.add_argument("--top-k", type=int, default=4, help="Maximum chunks to retrieve")
+    sub.add_parser("package-portable", help="Build a portable Windows desktop launcher bundle")
     sub.add_parser("doctor", help="Check Phase 1 environment and configuration")
     return parser
 
@@ -438,6 +455,46 @@ def main(argv: Sequence[str] | None = None) -> int:
                 decision = registry.promote_or_reject(args.baseline_id, exp.experiment_id)
                 output["promotion_decision"] = decision.to_dict()
             print(json.dumps(output, ensure_ascii=False, indent=2))
+            return 0
+        if args.command == "models":
+            from thai_offline_ai.model_manager import ModelManager
+
+            mgr = ModelManager(settings)
+            if args.install:
+                res = mgr.run_setup(args.install, allow_setup_network=bool(args.setup_mode))
+                print(json.dumps(res, ensure_ascii=False, indent=2))
+            else:
+                print(
+                    json.dumps(
+                        {"models": [m.to_dict() for m in mgr.list_statuses()]},
+                        ensure_ascii=False,
+                        indent=2,
+                    )
+                )
+            return 0
+        if args.command == "rag":
+            from thai_offline_ai.local_rag import LocalRAGStore
+
+            store = LocalRAGStore(Path(settings.app.output_dir) / "local_rag.db", settings=settings)
+            payload: dict[str, object] = {}
+            if args.ingest:
+                docs = store.ingest_files(args.ingest)
+                payload["ingested"] = [d.to_dict() for d in docs]
+            if args.search:
+                matches = store.search(args.search, top_k=args.top_k)
+                payload["matches"] = [m.to_dict() for m in matches]
+            if args.ask:
+                ans = store.ask(args.ask, top_k=args.top_k, use_llm=not args.no_llm)
+                payload["answer"] = ans.to_dict()
+            if not payload:
+                payload["documents"] = [d.to_dict() for d in store.list_documents()]
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+            return 0
+        if args.command == "package-portable":
+            from thai_offline_ai.packaging import build_portable_bundle
+
+            bundle = build_portable_bundle(settings)
+            print(json.dumps(bundle.to_dict(), ensure_ascii=False, indent=2))
             return 0
         if args.command == "stream-asr":
             import time
