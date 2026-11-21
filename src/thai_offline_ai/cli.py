@@ -150,6 +150,17 @@ def build_parser() -> argparse.ArgumentParser:
     lab_eval.add_argument("--domain-lexicon", help="Optional YAML domain terms list")
     lab_eval.add_argument("--model", help="ASR model: typhoon_asr or openthai2_asr")
     lab_eval.add_argument("--prompt", choices=("th-TH", "th-mix"), help="OpenThai2.0 prompt mode")
+    ci = sub.add_parser(
+        "conversation-intel",
+        help="Phase 7: summarize and extract grounded action items from a speaker transcript",
+    )
+    ci.add_argument("audio", nargs="?", help="Audio file: runs local ASR + diarization first")
+    ci.add_argument("--transcript-json", help="Output JSON of transcribe-speakers (segments)")
+    ci.add_argument("--text-file", help="UTF-8 text with 'SPEAKER_00: ...' lines")
+    ci.add_argument("--domain-lexicon", help="Optional YAML file containing a terms list")
+    ci.add_argument("--no-llm", action="store_true", help="Deterministic analytics only")
+    ci.add_argument("--model", help="ASR model: typhoon_asr or openthai2_asr")
+    ci.add_argument("--prompt", choices=("th-TH", "th-mix"), help="OpenThai2.0 prompt mode")
     sub.add_parser("doctor", help="Check Phase 1 environment and configuration")
     return parser
 
@@ -287,6 +298,48 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print(json.dumps(response.model_dump(mode="json"), ensure_ascii=False, indent=2))
             finally:
                 orchestrator.close_browser()
+            return 0
+        if args.command == "conversation-intel":
+            from thai_offline_ai.conversation_intel import (
+                ConversationIntelligenceService,
+                export_report,
+                load_utterances_from_json,
+                parse_speaker_text,
+                utterances_from_transcript,
+            )
+
+            sources = [args.audio, args.transcript_json, args.text_file]
+            if sum(s is not None for s in sources) != 1:
+                raise WorkbenchError(
+                    "Provide exactly one source: audio path, --transcript-json, or --text-file."
+                )
+            if args.transcript_json:
+                utterances = load_utterances_from_json(args.transcript_json)
+            elif args.text_file:
+                text_path = Path(args.text_file)
+                if not text_path.is_file():
+                    raise WorkbenchError(f"Text file not found: {text_path}")
+                utterances = parse_speaker_text(text_path.read_text(encoding="utf-8-sig"))
+            else:
+                utterances = utterances_from_transcript(
+                    compose_speaker_transcript(
+                        ASRAdapter(settings).transcribe_file(args.audio),
+                        DiarizationAdapter(settings).diarize_file(args.audio),
+                    )
+                )
+            report = ConversationIntelligenceService(settings).analyze(
+                utterances,
+                domain_terms=load_domain_terms(args.domain_lexicon),
+                use_llm=not args.no_llm,
+            )
+            json_path, md_path = export_report(report, settings)
+            print(
+                json.dumps(
+                    {**report.to_dict(), "exports": {"json": str(json_path), "markdown": str(md_path)}},
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
             return 0
         if args.command == "lab-generate-synthetic":
             from thai_offline_ai.speech_lab.synthetic import (

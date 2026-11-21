@@ -18,6 +18,12 @@ from thai_offline_ai.agent.voice.voice_pipeline import JarvisVoicePipeline
 from thai_offline_ai.batch import BatchASRProcessor, export_batch_result
 from thai_offline_ai.benchmark import ASRBenchmark, export_benchmark_result
 from thai_offline_ai.config import Settings, load_settings
+from thai_offline_ai.conversation_intel import (
+    ConversationIntelligenceService,
+    parse_speaker_text,
+    utterances_from_transcript,
+)
+from thai_offline_ai.conversation_intel import export_report as export_conversation_report
 from thai_offline_ai.errors import WorkbenchError
 from thai_offline_ai.llm_types import ChatMessage
 from thai_offline_ai.runtime import prepare_runtime
@@ -194,6 +200,38 @@ def build_app(settings: Settings | None = None) -> tuple[gr.Blocks, Settings]:
         # Metadata/discovery only in UI; the doctor command also checks required imports.
         checks = collect_diagnostics(settings, check_imports=False)
         return render_system_cards(checks, settings), format_report(checks)
+
+    def conversation_intel_ui(
+        audio: str | None, pasted: str, terms_text: str, use_llm: bool
+    ) -> tuple[str, dict[str, Any], str]:
+        try:
+            if (pasted or "").strip():
+                utterances = parse_speaker_text(pasted)
+            elif audio:
+                utterances = utterances_from_transcript(
+                    compose_speaker_transcript(
+                        asr_adapter.transcribe_file(
+                            audio, model=active_asr["model"], prompt_mode=active_asr["prompt"]
+                        ),
+                        diarization_adapter.diarize_file(audio),
+                    )
+                )
+            else:
+                raise WorkbenchError("วางบทสนทนา (SPEAKER_00: ...) หรือเลือกไฟล์เสียงก่อนวิเคราะห์")
+            terms = [t.strip() for t in (terms_text or "").replace("\n", ",").split(",") if t.strip()]
+            report = ConversationIntelligenceService(settings).analyze(
+                utterances,
+                domain_terms=terms,
+                use_llm=bool(use_llm and settings.llm.enabled),
+            )
+            json_path, _ = export_conversation_report(report, settings)
+            info = (
+                f"วิเคราะห์ {report.utterance_count} ช่วงคำพูด · ผู้พูด {len(report.speakers)} · "
+                f"บันทึก: {json_path.name}"
+            )
+            return report.to_markdown(), report.to_dict(), info
+        except WorkbenchError as exc:
+            raise gr.Error(str(exc)) from None
 
     def count_chars(text: str) -> str:
         raw = text or ""
@@ -1494,6 +1532,50 @@ def build_app(settings: Settings | None = None) -> tuple[gr.Blocks, Settings]:
                     lab_list_experiments_ui,
                     outputs=lab_exp_table,
                     api_name="lab_list_experiments",
+                )
+
+            with gr.Accordion(
+                "Conversation Intelligence (Phase 7 · สรุปบทสนทนา & Action Items)", open=False
+            ):
+                gr.Markdown(
+                    "วางบทสนทนาแบบ `SPEAKER_00: ข้อความ` หรือเลือกไฟล์เสียง (ASR + Diarization) "
+                    "สรุปและ Action Items มาจาก Local LLM และอ้างอิงช่วงคำพูดจริงเสมอ "
+                    "(ไม่เดาบทบาท Agent/Customer)"
+                )
+                with gr.Row(equal_height=False):
+                    with gr.Column(scale=5):
+                        ci_pasted = gr.Textbox(
+                            label="บทสนทนา (วางข้อความ)",
+                            placeholder="SPEAKER_00: สวัสดีครับ ขอสอบถามเรื่องกรมธรรม์\nSPEAKER_01: ได้ครับ เดี๋ยวส่งเอกสารให้ภายในวันศุกร์",
+                            lines=6,
+                        )
+                        ci_audio = gr.Audio(
+                            label="หรือไฟล์เสียงบทสนทนา",
+                            type="filepath",
+                            sources=["upload"],
+                            interactive=settings.asr.enabled and settings.diarization.enabled,
+                        )
+                        ci_terms = gr.Textbox(
+                            label="คำศัพท์เฉพาะโดเมน (คั่นด้วยจุลภาค)",
+                            placeholder="กรมธรรม์, เบี้ยประกัน, ต่ออายุ",
+                        )
+                        ci_use_llm = gr.Checkbox(
+                            label="สรุปด้วย Local LLM",
+                            value=settings.llm.enabled,
+                            interactive=settings.llm.enabled,
+                        )
+                        ci_btn = gr.Button("วิเคราะห์บทสนทนา", variant="primary")
+                    with gr.Column(scale=7):
+                        ci_report_md = gr.Markdown()
+                        ci_info = gr.Textbox(label="สถานะ", interactive=False)
+                        with gr.Accordion("รายงาน JSON", open=False):
+                            ci_report_json = gr.JSON(label="Conversation Report")
+                ci_btn.click(
+                    conversation_intel_ui,
+                    [ci_audio, ci_pasted, ci_terms, ci_use_llm],
+                    [ci_report_md, ci_report_json, ci_info],
+                    api_name="conversation_intel",
+                    concurrency_limit=1,
                 )
 
         with gr.Tab("Benchmark"):

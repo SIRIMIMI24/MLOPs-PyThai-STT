@@ -45,6 +45,10 @@ Shared supporting modules preserve the existing boundaries:
   loopback-only `OllamaLocalLLM`, and shared `TTSAdapter` with session-local history,
   `prepare_speech_text()` normalization, and real stage-by-stage latency telemetry
   (`VoiceAssistantMetrics`). See [`PHASE6_VOICE_ASSISTANT.md`](PHASE6_VOICE_ASSISTANT.md).
+- `conversation_intel.py` (Phase 7 — Conversation Intelligence): deterministic speaker
+  stats, keywords and domain-term hits plus optional local-LLM summary / decisions / action
+  items that are schema-validated and grounded to real utterance indexes (no inferred roles).
+  See [`PHASE7_CONVERSATION_INTELLIGENCE.md`](PHASE7_CONVERSATION_INTELLIGENCE.md).
 - `speech_lab/` (Phase 6.5 — Speech AI Continuous Improvement Lab): governed local
   data and experiment pipeline (`datasets.py` split separation & SHA-256 leakage guards,
   `synthetic.py` local TTS + deterministic NumPy/SciPy audio augmentations,
