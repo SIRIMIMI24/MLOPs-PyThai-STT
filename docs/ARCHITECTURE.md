@@ -1,6 +1,6 @@
 # Architecture
 
-## Phase 5 implementation boundary
+## Phase 5.5 implementation boundary
 
 Phase 3 exposes NLP, CPU-only TTS, and file-based CPU-only ASR through CLI and
 Gradio. Phase 3.5 adds a separate near-real-time streaming service, without
@@ -9,7 +9,10 @@ and sequential batch processor. Phase 3.7 adds an evaluation layer that consumes
 batch results and never alters inference. Phase 4 adds a loopback-only Ollama
 intelligence boundary that does not consume ASR text implicitly. Phase 5 adds an
 independent local diarization adapter and timestamp-only composition layer; raw ASR
-values remain unchanged. See
+values remain unchanged. Phase 5.5 fans out the single canonical mono 16 kHz PCM
+stream to both `StreamingASRService` and a session-scoped `StreamingDiarizationService`
+(`NemotronDiarization` + `NumpySpeakerCache`), populating the existing
+`StreamingASREvent.speaker` field via deterministic greatest temporal overlap. See
 [`ASR_FUTURE_ROADMAP.md`](ASR_FUTURE_ROADMAP.md) for the planned evaluation,
 synthetic-data, and controlled adaptation governance.
 
@@ -33,6 +36,20 @@ Shared supporting modules preserve the existing boundaries:
   Nemotron ONNX speaker turns with cache-only model readiness and CPU fallback.
 - `speaker_composition.py`: deterministic greatest-overlap attribution of existing
   timestamped ASR segments, without altering `ASRResult`.
+- `streaming_diarization.py`: session-scoped incremental Nemotron-3 ONNX speaker
+  diarization (`StreamingDiarizationService`) and single-stream 16 kHz PCM fan-out
+  (`StreamingSpeakerASRService`) populating `StreamingASREvent.speaker` without
+  mutating raw ASR text or inferring business roles.
+- `agent/` (Phase 8 — JARVIS Personal AI Agent): additive agentic layer with
+  `schemas.py`, `config.py`, `permissions.py` (3-tier approval & URL/prompt-injection
+  guard), `memory.py` (local SQLite conversation + approved preferences store),
+  `browser/` (lazy headed Playwright Chromium automation in an isolated profile),
+  `tool_registry.py`, `tool_executor.py`, `planner.py` (structured JSON tool-calling
+  adapter for local Ollama models), `orchestrator.py` (bounded ReAct/Plan-Execute
+  loop with cancellation & approval pause/resume), and `voice/voice_pipeline.py`
+  (reusing shared `ASRAdapter` and `TTSAdapter` instances without duplicate loads).
+  See [`JARVIS_PHASE8_SPEC.md`](JARVIS_PHASE8_SPEC.md) and
+  [`JARVIS_SECURITY_MODEL.md`](JARVIS_SECURITY_MODEL.md).
 
 CLI, UI, and doctor load the same settings. Relative paths use the working
 directory; explicit config paths must exist. `.env` is not automatically loaded.
@@ -125,8 +142,19 @@ class StreamingASRService:
     def finalize(self, session_id: str) -> list[StreamingASREvent]: ...
     def close_session(self, session_id: str) -> None: ...
 
-class OllamaLocalLLM:
-    def chat(self, messages: Sequence[ChatMessage]) -> LLMResult: ...
+class StreamingDiarizationService:
+    def start_session(self) -> str: ...
+    def push_audio(self, session_id: str, samples, sample_rate: int) -> list[SpeakerTurn]: ...
+    def get_turns(self, session_id: str, *, include_open: bool = False) -> list[SpeakerTurn]: ...
+    def finalize(self, session_id: str) -> list[SpeakerTurn]: ...
+    def close_session(self, session_id: str) -> None: ...
+
+class StreamingSpeakerASRService:
+    def start_session(self) -> str: ...
+    def push_audio(self, session_id: str, samples, sample_rate: int) -> list[StreamingASREvent]: ...
+    def finalize(self, session_id: str) -> list[StreamingASREvent]: ...
+    def format_transcript(self, session_id: str) -> str: ...
+    def close_session(self, session_id: str) -> None: ...
 ```
 
 ## Configuration

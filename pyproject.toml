@@ -31,6 +31,9 @@ asr = [
 llm = [
   "requests>=2.32",
 ]
+agent = [
+  "playwright>=1.50",
+]
 dev = [
   "pytest>=8.0",
   "ruff>=0.9",

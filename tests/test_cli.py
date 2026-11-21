@@ -51,7 +51,8 @@ def test_module_cli_in_fresh_process(tmp_path):
         ["nlp", "a", "--text", "b"],
     ],
 )
-def test_unavailable_or_invalid_cli_is_actionable(args, capsys):
+def test_unavailable_or_invalid_cli_is_actionable(args, capsys, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
     assert main(args) == 2
     error = capsys.readouterr().err
     assert "[FAIL]" in error and "Traceback" not in error

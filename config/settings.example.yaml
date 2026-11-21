@@ -17,8 +17,12 @@ tts:
   backend: "pythaitts"
   model: "lunarlist_onnx"
   # PyThaiTTS 0.4.2 Lunarlist ONNX has a fixed 22050 Hz output and no voice selector.
+  # Optional Kokoro Thai ONNX (scripts/setup_kokoro_tts_model.py) adds 12 voices at 24000 Hz.
   sample_rate: 22050
   model_dir: "models/pythaitts/lunarlist_onnx"
+  kokoro_model_dir: "models/kokoro-thai-onnx"
+  voice: "f_young_bright"
+  speed: 1.05
 
 asr:
   enabled: false
@@ -29,6 +33,10 @@ asr:
   # Decoder window for optional Phase 3.5 near-real-time ASR sessions.
   stream_chunk_seconds: 1.0
   model_dir: "models/pythaiasr"
+  # Optional OpenThai2.0-ASR-Streaming ONNX cache (scripts/setup_openthai_asr_model.py).
+  openthai_model_dir: "models/openthai2-asr-streaming"
+  openthai_precision: "int8"
+  openthai_prompt: "th-TH"
 
 llm:
   enabled: false
@@ -50,4 +58,7 @@ diarization:
   device: "auto"
   precision: "int8"
   sampling_rate: 16000
+  # Streaming window and lookahead for Phase 5.5 live speaker diarization.
+  stream_chunk_seconds: 1.6
+  stream_right_context_seconds: 0.32
   model_dir: "models/pythaiasr/nemotron-3-diarization"

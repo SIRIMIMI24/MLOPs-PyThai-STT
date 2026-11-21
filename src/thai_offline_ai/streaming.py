@@ -10,6 +10,13 @@ from typing import Any
 from uuid import uuid4
 
 from thai_offline_ai.adapters.asr import model_is_available
+from thai_offline_ai.adapters.openthai_asr import (
+    OPENTHAI_MODEL_NAME,
+    OpenThai2ONNXModel,
+    OpenThai2RealtimeStreamASR,
+    is_openthai_model,
+    resolve_available_precision,
+)
 from thai_offline_ai.config import Settings
 from thai_offline_ai.errors import WorkbenchError
 
@@ -62,6 +69,9 @@ class StreamingSessionMetrics:
 @dataclass(slots=True)
 class _Session:
     decoder: Any
+    model_name: str = "typhoon_asr"
+    backend_name: str = "pythaiasr"
+    prompt_mode: str = "th-TH"
     sequence: int = 0
     events: deque[StreamingASREvent] = field(default_factory=lambda: deque(maxlen=256))
     closed: bool = False
@@ -92,6 +102,7 @@ class StreamingASRService:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self._model: Any | None = None
+        self._openthai_model: OpenThai2ONNXModel | None = None
         self._model_lock = Lock()
         self._inference_lock = Lock()
         self._sessions: dict[str, _Session] = {}
@@ -125,7 +136,40 @@ class StreamingASRService:
                 ) from exc
         return self._model
 
-    def start_session(self) -> str:
+    def _load_openthai_model(self) -> OpenThai2ONNXModel:
+        config = self.settings.asr
+        if not config.enabled:
+            raise WorkbenchError("ASR is disabled. Set asr.enabled=true after local model setup.")
+        if self._openthai_model is not None:
+            return self._openthai_model
+        with self._model_lock:
+            if self._openthai_model is not None:
+                return self._openthai_model
+            precision = resolve_available_precision(
+                config.openthai_model_dir, config.openthai_precision
+            )
+            if precision is None:
+                raise WorkbenchError(
+                    "OpenThai2.0 ASR ONNX model is not available locally. "
+                    f"Run: python scripts/setup_openthai_asr_model.py --precision {config.openthai_precision}"
+                )
+            try:
+                self._openthai_model = OpenThai2ONNXModel(
+                    config.openthai_model_dir,
+                    precision=precision,
+                    device=config.device,
+                )
+            except WorkbenchError:
+                raise
+            except Exception as exc:
+                raise WorkbenchError(
+                    "OpenThai2.0 streaming ASR could not initialize. Confirm the local ONNX cache."
+                ) from exc
+        return self._openthai_model
+
+    def start_session(
+        self, *, model: str | None = None, prompt_mode: str | None = None
+    ) -> str:
         """Prepare an isolated decoder before browser capture is enabled.
 
         Starting a session is an explicit user action, so loading the cached
@@ -133,8 +177,17 @@ class StreamingASRService:
         avoiding a race in which the first microphone chunk waits for model
         initialisation.
         """
+        effective_model = model or self.settings.asr.model or "typhoon_asr"
+        use_openthai = is_openthai_model(
+            effective_model, None if model is not None else self.settings.asr.backend
+        )
         session_id = uuid4().hex
-        session = _Session(decoder=None)
+        session = _Session(
+            decoder=None,
+            model_name=OPENTHAI_MODEL_NAME if use_openthai else effective_model,
+            backend_name="openthai_onnx" if use_openthai else "pythaiasr",
+            prompt_mode=prompt_mode or self.settings.asr.openthai_prompt,
+        )
         with self._sessions_lock:
             self._sessions[session_id] = session
         preparation_started_at = time.perf_counter()
@@ -160,6 +213,21 @@ class StreamingASRService:
 
     def _decoder_for(self, session: _Session) -> Any:
         if session.decoder is None:
+            if session.backend_name == "openthai_onnx":
+                try:
+                    session.decoder = OpenThai2RealtimeStreamASR(
+                        model=self._load_openthai_model(),
+                        sample_rate=self.settings.asr.sampling_rate,
+                        step_sec=self.settings.asr.stream_chunk_seconds,
+                        prompt_mode=session.prompt_mode,
+                    )
+                except WorkbenchError:
+                    raise
+                except Exception as exc:
+                    raise WorkbenchError(
+                        "OpenThai2.0 streaming ASR could not start for this session."
+                    ) from exc
+                return session.decoder
             try:
                 from pythaiasr import RealtimeStreamASR
 
@@ -221,8 +289,9 @@ class StreamingASRService:
             text=text,
             is_final=is_final,
             metadata={
-                "backend": "pythaiasr",
-                "model": self.settings.asr.model,
+                "backend": session.backend_name,
+                "model": session.model_name,
+                **({"prompt": session.prompt_mode} if session.backend_name == "openthai_onnx" else {}),
                 **({"timing": timing} if timing else {}),
             },
         )

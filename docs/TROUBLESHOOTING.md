@@ -92,6 +92,11 @@ First-run model downloads are setup-time network activity. After download, runti
   separation; use a consented non-sensitive two-speaker recording for that check.
 - Overlapping speech and coarse ASR timestamps can leave an ambiguous whole ASR
   segment. The workbench records that condition and does not invent word timing.
+- In Phase 5.5 live streaming, diarization uses a configurable lookahead window
+  (`diarization.stream_chunk_seconds`, default `1.6s`, plus
+  `diarization.stream_right_context_seconds`, default `0.32s`). Early ASR text may
+  briefly display as `UNATTRIBUTED` (`pending_diarization`) until the first window
+  completes and is reconciled automatically as new turns arrive or on Stop.
 
 ## Audio format
 Normalize ASR input to a supported mono PCM format and sample rate in a temporary file when needed. Delete temporary files after inference unless debug mode is explicitly enabled.

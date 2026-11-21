@@ -61,7 +61,13 @@ class BatchASRProcessor:
         candidates = root.rglob("*") if recursive else root.iterdir()
         return sorted((item for item in candidates if item.is_file() and is_supported_audio(item)), key=lambda item: item.name.lower())
 
-    def transcribe_paths(self, paths: list[str | Path]) -> BatchASRResult:
+    def transcribe_paths(
+        self,
+        paths: list[str | Path],
+        *,
+        model: str | None = None,
+        prompt_mode: str | None = None,
+    ) -> BatchASRResult:
         batch_id = uuid4().hex
         started = time.perf_counter()
         items: list[BatchASRItemResult] = []
@@ -69,7 +75,12 @@ class BatchASRProcessor:
             path = Path(raw_path)
             item_started = time.perf_counter()
             try:
-                result = self.adapter.transcribe_file(path)
+                if model is None and prompt_mode is None:
+                    result = self.adapter.transcribe_file(path)
+                else:
+                    result = self.adapter.transcribe_file(
+                        path, model=model, prompt_mode=prompt_mode
+                    )
                 processing_time = time.perf_counter() - item_started
                 metadata = result.metadata
                 duration = result.duration

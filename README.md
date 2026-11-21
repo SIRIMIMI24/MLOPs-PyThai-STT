@@ -1,4 +1,4 @@
-# Thai Offline AI Workbench — Phase 5
+# Thai Offline AI Workbench — Phase 5.5
 
 > A privacy-first, CPU-first Thai AI workbench for local NLP, text-to-speech,
 > speech-to-text, speaker diarization, and local LLM chat.
@@ -20,7 +20,7 @@ Python **3.10 (64-bit)** is the primary supported version.
 | TTS | Thai WAV synthesis using Lunarlist ONNX | Lazy, after explicit local model setup |
 | ASR | WAV/FLAC/MP3/OGG transcription, batch processing, and live browser capture | Lazy, after explicit local model setup |
 | Evaluation | Reproducible CER, WER, RTF, error analysis, and local reports | Uses the configured local ASR backend |
-| Diarization | Anonymous `SPEAKER_00`/`SPEAKER_01` turns and timestamp-based ASR composition | Lazy, after explicit local model setup |
+| Diarization | Anonymous `SPEAKER_00`/`SPEAKER_01` file turns, ASR composition, and live streaming fan-out | Lazy, after explicit local model setup |
 | Local LLM | Session-local chat via Ollama at `127.0.0.1` | Only on an explicit chat request |
 
 ## Quick start
@@ -132,6 +132,23 @@ The TTS tab loads the CPU ONNX model only after **สร้างเสียง
 missing local cache produces an actionable setup message and never falls back to a
 remote inference service.
 
+### Optional TTS model: Kokoro Thai ONNX (12 voices, 24 kHz)
+
+For richer multi-voice bilingual **Thai + English** speech (including lively,
+clear, and warm female and male voices with adjustable speed on CPU, Apache-2.0
+via `kunato/wayu-kokoro-thai-v1`):
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install tltk "scikit-learn>=1.6" espeakng-loader phonemizer-fork num2words
+.\.venv\Scripts\python.exe -m pip install --no-deps misaki
+.\.venv\Scripts\python.exe scripts\setup_kokoro_tts_model.py
+.\.venv\Scripts\python.exe -m thai_offline_ai.cli tts "สวัสดีค่ะ วันนี้มาลองใช้ AI และ Python บน CPU แบบ Offline กันนะคะ" --model kokoro_thai_onnx --voice f_young_bright --speed 1.05
+```
+
+Files are stored under `models\kokoro-thai-onnx` (~316 MB). Switch between
+**Kokoro Thai ONNX** (12 voices + Speed slider) and **PyThaiTTS Lunarlist ONNX**
+directly in the **TTS** tab.
+
 ## Phase 3: local Thai ASR setup
 
 Install the ASR package and explicitly retrieve the Typhoon ONNX files once:
@@ -146,6 +163,28 @@ WAV uploads, converts them to mono 16 kHz PCM in a temporary local folder, and
 removes that temporary file after inference. Use `thai-offline-ai asr input.wav` or
 the ASR tab. Results include `text`, `segments`, duration, backend, and model;
 speaker and confidence remain `null` until a future diarization phase.
+
+### Optional ASR model: OpenThai2.0-ASR-Streaming (iApp ONNX)
+
+You can also run **iApp OpenThai2.0-ASR-Streaming** (`iapp/OpenThai2.0-ASR-Streaming-ONNX`,
+OpenMDW-1.1) locally on CPU with ONNX Runtime (no PyTorch or NeMo needed) alongside
+Typhoon ASR. Download the INT8 ONNX files (~0.99 GB) or FP32 (~2.60 GB) once:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\setup_openthai_asr_model.py --precision int8
+# Or full precision (~2.60 GB):
+.\.venv\Scripts\python.exe scripts\setup_openthai_asr_model.py --precision fp32
+```
+
+Files are stored under `models\openthai2-asr-streaming`. Switch between
+`typhoon_asr` and `openthai2_asr` (with `th-TH` Thai-only or `th-mix` Thai+English
+prompt modes) directly in the **ASR** tab dropdown or via CLI:
+
+```powershell
+.\.venv\Scripts\python.exe -m thai_offline_ai.cli asr input.wav --model openthai2_asr --prompt th-TH
+.\.venv\Scripts\python.exe -m thai_offline_ai.cli asr input.wav --model openthai2_asr --prompt th-mix
+.\.venv\Scripts\python.exe -m thai_offline_ai.cli stream-asr input.wav --model openthai2_asr --with-speakers
+```
 
 The browser upload workflow was manually verified with a local WAV and real
 PyThaiASR transcription. Direct arbitrary local-path HTTP injection is intentionally
@@ -361,6 +400,34 @@ when**, while ASR answers **what was said**. Recognition errors observed in that
 browser sample are ASR errors and are evaluated separately by Phase 3.7; they are
 not diarization failures. Future diarization evaluation needs consented recordings
 with verified speaker-turn boundaries and should report DER (and optionally JER).
+
+## Phase 5.5: streaming ASR + streaming speaker diarization
+
+Phase 5.5 fans out a single canonical mono 16 kHz PCM stream to both
+`StreamingASRService` (Typhoon ONNX) and `StreamingDiarizationService`
+(Nemotron-3 ONNX with a per-session `NumpySpeakerCache`). No second microphone
+capture is opened, models remain lazy at app startup, and inference is serialized
+safely per local engine.
+
+Each streaming diarization window defaults to `1.6s` with `0.32s` right-context
+lookahead (`diarization.stream_chunk_seconds` and
+`diarization.stream_right_context_seconds`). Early ASR fragments that arrive
+before the first diarization window completes are initially marked
+`speaker_alignment: "pending_diarization"` and automatically reconciled as turns
+arrive and on `finalize()`, without ever rewriting raw ASR text.
+
+Simulate live ASR + speaker diarization from any local audio file (WAV, FLAC,
+MP3, OGG) without microphone hardware:
+
+```powershell
+.\.venv\Scripts\python.exe -m thai_offline_ai.cli stream-asr C:\Audio\meeting.wav --with-speakers
+.\.venv\Scripts\python.exe scripts\stream_asr_wav.py C:\Audio\meeting.wav --with-speakers --realtime
+```
+
+In the Gradio **ASR** tab, the **Near Real-Time ASR + Speaker Diarization (Phase
+5.5)** section follows the same **Preparing** → **Ready / Listening** →
+**Stopped** lifecycle and displays live `[SPEAKER_00]` / `[SPEAKER_01]` lines,
+live `Speaker Turns`, and combined ASR + diarization RTF metrics.
 
 ## CLI and configuration
 

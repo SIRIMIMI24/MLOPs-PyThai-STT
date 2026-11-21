@@ -87,11 +87,15 @@ def collect_diagnostics(
         ("scipy", "scipy", settings.asr.enabled),
         ("onnxruntime", "onnxruntime", settings.tts.enabled),
         ("onnxruntime-gpu", "onnxruntime", False),
+        ("playwright", "playwright", False),
     ]:
         results.append(
             _package_check(distribution, module, required=required, check_imports=check_imports)
         )
     if settings.tts.enabled:
+        from thai_offline_ai.adapters.kokoro_tts import (
+            kokoro_model_is_available as kokoro_tts_available,
+        )
         from thai_offline_ai.adapters.tts import model_is_available
 
         ready = model_is_available(settings.tts.model_dir)
@@ -103,6 +107,26 @@ def collect_diagnostics(
                 + ("all Lunarlist ONNX files found." if ready else "missing; run python scripts/setup_tts_model.py."),
             )
         )
+        kokoro_ready = kokoro_tts_available(settings.tts.kokoro_model_dir)
+        has_misaki = importlib.util.find_spec("misaki") is not None
+        has_espeak = importlib.util.find_spec("espeakng_loader") is not None
+        bilingual_note = (
+            "bilingual Thai+English G2P ready."
+            if has_misaki and has_espeak
+            else "Thai G2P ready (install misaki + espeakng-loader for English words)."
+        )
+        results.append(
+            Check(
+                "OK" if kokoro_ready else "SKIP",
+                "Kokoro Thai TTS cache",
+                f"{settings.tts.kokoro_model_dir}; "
+                + (
+                    f"12-voice 24 kHz ONNX files found (voice={settings.tts.voice}, speed={settings.tts.speed}); {bilingual_note}"
+                    if kokoro_ready
+                    else "optional; run python scripts/setup_kokoro_tts_model.py."
+                ),
+            )
+        )
         try:
             import onnxruntime
 
@@ -112,9 +136,27 @@ def collect_diagnostics(
         results.append(Check("SKIP", "TTS synthesis", "model intentionally not loaded by doctor."))
     if settings.asr.enabled:
         from thai_offline_ai.adapters.asr import model_is_available as asr_model_available
+        from thai_offline_ai.adapters.openthai_asr import (
+            resolve_available_precision as openthai_available_precision,
+        )
 
         ready = asr_model_available(settings.asr.model_dir)
         results.append(Check("OK" if ready else "WARN", "ASR model cache", f"{settings.asr.model_dir}; " + ("Typhoon ONNX files found." if ready else "missing; run python scripts/setup_asr_model.py.")))
+        openthai_precision = openthai_available_precision(
+            settings.asr.openthai_model_dir, settings.asr.openthai_precision
+        )
+        results.append(
+            Check(
+                "OK" if openthai_precision else "SKIP",
+                "OpenThai2.0 ASR cache",
+                f"{settings.asr.openthai_model_dir}; "
+                + (
+                    f"{openthai_precision} ONNX files found (prompt={settings.asr.openthai_prompt})."
+                    if openthai_precision
+                    else "optional; run python scripts/setup_openthai_asr_model.py."
+                ),
+            )
+        )
         results.append(Check("OK", "ASR device", f"{settings.asr.device}; CPU-first configuration."))
         results.append(
             Check(
@@ -185,6 +227,14 @@ def collect_diagnostics(
             results.append(Check("OK", "NVIDIA GPU", gpu))
         results.append(
             Check("OK", "Diarization device", f"{resolve_device(settings.diarization.device)} selected.")
+        )
+        results.append(
+            Check(
+                "OK",
+                "Diarization streaming",
+                f"chunk={settings.diarization.stream_chunk_seconds}s; "
+                f"right_context={settings.diarization.stream_right_context_seconds}s.",
+            )
         )
         results.append(Check("SKIP", "Diarization inference", "model intentionally not loaded by doctor."))
     if settings.nlp.enabled and check_imports and not any(c.status == "FAIL" for c in results):

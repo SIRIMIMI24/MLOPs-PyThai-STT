@@ -34,6 +34,9 @@ class TTSConfig:
     model: str = "lunarlist_onnx"
     sample_rate: int = 22050
     model_dir: str = "models/pythaitts/lunarlist_onnx"
+    kokoro_model_dir: str = "models/kokoro-thai-onnx"
+    voice: str = "f_young_bright"
+    speed: float = 1.05
 
 
 @dataclass(slots=True)
@@ -45,6 +48,9 @@ class ASRConfig:
     sampling_rate: int = 16000
     stream_chunk_seconds: float = 1.0
     model_dir: str = "models/pythaiasr"
+    openthai_model_dir: str = "models/openthai2-asr-streaming"
+    openthai_precision: str = "int8"
+    openthai_prompt: str = "th-TH"
 
 
 @dataclass(slots=True)
@@ -67,6 +73,8 @@ class DiarizationConfig:
     device: str = "auto"
     precision: str = "int8"
     sampling_rate: int = 16000
+    stream_chunk_seconds: float = 1.6
+    stream_right_context_seconds: float = 0.32
     model_dir: str = "models/pythaiasr/nemotron-3-diarization"
 
 
@@ -105,9 +113,16 @@ ENV_FIELDS = {
     "THAI_AI_TTS_BACKEND": ("tts", "backend"),
     "THAI_AI_TTS_MODEL": ("tts", "model"),
     "THAI_AI_TTS_MODEL_DIR": ("tts", "model_dir"),
+    "THAI_AI_TTS_KOKORO_MODEL_DIR": ("tts", "kokoro_model_dir"),
+    "THAI_AI_TTS_VOICE": ("tts", "voice"),
+    "THAI_AI_TTS_SPEED": ("tts", "speed"),
     "THAI_AI_ASR_ENABLED": ("asr", "enabled"),
     "THAI_AI_ASR_BACKEND": ("asr", "backend"),
+    "THAI_AI_ASR_MODEL": ("asr", "model"),
     "THAI_AI_ASR_MODEL_DIR": ("asr", "model_dir"),
+    "THAI_AI_ASR_OPENTHAI_MODEL_DIR": ("asr", "openthai_model_dir"),
+    "THAI_AI_ASR_OPENTHAI_PRECISION": ("asr", "openthai_precision"),
+    "THAI_AI_ASR_OPENTHAI_PROMPT": ("asr", "openthai_prompt"),
     "THAI_AI_LLM_ENABLED": ("llm", "enabled"),
     "THAI_AI_LLM_BACKEND": ("llm", "backend"),
     "THAI_AI_LLM_BASE_URL": ("llm", "base_url"),
@@ -116,6 +131,11 @@ ENV_FIELDS = {
     "THAI_AI_DIARIZATION_ENABLED": ("diarization", "enabled"),
     "THAI_AI_DIARIZATION_DEVICE": ("diarization", "device"),
     "THAI_AI_DIARIZATION_MODEL_DIR": ("diarization", "model_dir"),
+    "THAI_AI_DIARIZATION_STREAM_CHUNK_SECONDS": ("diarization", "stream_chunk_seconds"),
+    "THAI_AI_DIARIZATION_STREAM_RIGHT_CONTEXT_SECONDS": (
+        "diarization",
+        "stream_right_context_seconds",
+    ),
 }
 
 
@@ -151,8 +171,8 @@ def validate_settings(settings: Settings) -> Settings:
         raise ConfigurationError("app.log_level must be DEBUG, INFO, WARNING, ERROR, or CRITICAL.")
     for name, choices in {
         "nlp": {"pythainlp"},
-        "tts": {"pythaitts"},
-        "asr": {"pythaiasr"},
+        "tts": {"pythaitts", "kokoro_onnx"},
+        "asr": {"pythaiasr", "openthai_onnx"},
         "llm": {"ollama", "llama_cpp"},
         "diarization": {"pythaiasr"},
     }.items():
@@ -181,18 +201,32 @@ def validate_settings(settings: Settings) -> Settings:
         raise ConfigurationError("diarization.precision must be int8 or fp32.")
     if settings.diarization.sampling_rate != 16000:
         raise ConfigurationError("diarization.sampling_rate must be 16000 for the verified backend.")
+    if not 0.4 <= settings.diarization.stream_chunk_seconds <= 10.0:
+        raise ConfigurationError(
+            "diarization.stream_chunk_seconds must be from 0.4 to 10.0 seconds."
+        )
+    if not 0.0 <= settings.diarization.stream_right_context_seconds <= 3.2:
+        raise ConfigurationError(
+            "diarization.stream_right_context_seconds must be from 0.0 to 3.2 seconds."
+        )
     if settings.asr.sampling_rate <= 0:
         raise ConfigurationError("asr.sampling_rate must be positive.")
     if not 0.25 <= settings.asr.stream_chunk_seconds <= 3.0:
         raise ConfigurationError("asr.stream_chunk_seconds must be from 0.25 to 3.0 seconds.")
-    if settings.tts.model != "lunarlist_onnx":
+    if settings.asr.openthai_precision not in {"int8", "fp32"}:
+        raise ConfigurationError("asr.openthai_precision must be int8 or fp32.")
+    if settings.asr.openthai_prompt not in {"th-TH", "th-mix"}:
+        raise ConfigurationError("asr.openthai_prompt must be th-TH or th-mix.")
+    if settings.tts.model not in {"lunarlist_onnx", "kokoro_thai_onnx"}:
         raise ConfigurationError(
-            "tts.model must be lunarlist_onnx. It is the verified CPU/ONNX backend for Phase 2."
+            "tts.model must be lunarlist_onnx or kokoro_thai_onnx."
         )
-    if settings.tts.sample_rate != 22050:
+    if settings.tts.sample_rate not in {22050, 24000}:
         raise ConfigurationError(
-            "tts.sample_rate must be 22050 for the verified lunarlist_onnx backend."
+            "tts.sample_rate must be 22050 (lunarlist_onnx) or 24000 (kokoro_thai_onnx)."
         )
+    if not 0.7 <= settings.tts.speed <= 1.5:
+        raise ConfigurationError("tts.speed must be from 0.7 to 1.5.")
     if not 0 <= settings.llm.temperature <= 2 or settings.llm.max_tokens <= 0:
         raise ConfigurationError("llm.temperature must be 0–2 and llm.max_tokens positive.")
     raw = settings.app.output_dir
@@ -217,10 +251,26 @@ def validate_settings(settings: Settings) -> Settings:
     if model_dir == Path(model_dir.anchor) or str(model_dir).startswith(("\\\\", "//")):
         raise ConfigurationError("tts.model_dir must be a local folder, not a drive root/share.")
     settings.tts.model_dir = str(model_dir)
+    raw_kokoro_dir = settings.tts.kokoro_model_dir
+    if raw_kokoro_dir.startswith(("\\\\", "//")) or PureWindowsPath(raw_kokoro_dir).drive.startswith("\\"):
+        raise ConfigurationError("tts.kokoro_model_dir must be a local directory, not a network share.")
+    kokoro_dir = Path(raw_kokoro_dir).expanduser().resolve()
+    if kokoro_dir == Path(kokoro_dir.anchor) or str(kokoro_dir).startswith(("\\\\", "//")):
+        raise ConfigurationError("tts.kokoro_model_dir must be a local folder, not a drive root/share.")
+    settings.tts.kokoro_model_dir = str(kokoro_dir)
     asr_dir = Path(settings.asr.model_dir).expanduser().resolve()
     if asr_dir == Path(asr_dir.anchor) or str(asr_dir).startswith(("\\\\", "//")):
         raise ConfigurationError("asr.model_dir must be a local folder, not a drive root/share.")
     settings.asr.model_dir = str(asr_dir)
+    raw_openthai_dir = settings.asr.openthai_model_dir
+    if raw_openthai_dir.startswith(("\\\\", "//")) or PureWindowsPath(raw_openthai_dir).drive.startswith("\\"):
+        raise ConfigurationError("asr.openthai_model_dir must be a local directory, not a network share.")
+    openthai_dir = Path(raw_openthai_dir).expanduser().resolve()
+    if openthai_dir == Path(openthai_dir.anchor) or str(openthai_dir).startswith(("\\\\", "//")):
+        raise ConfigurationError(
+            "asr.openthai_model_dir must be a local folder, not a drive root/share."
+        )
+    settings.asr.openthai_model_dir = str(openthai_dir)
     diarization_dir = Path(settings.diarization.model_dir).expanduser().resolve()
     if diarization_dir == Path(diarization_dir.anchor) or str(diarization_dir).startswith(("\\\\", "//")):
         raise ConfigurationError("diarization.model_dir must be a local folder, not a drive root/share.")
@@ -295,7 +345,7 @@ def load_settings(path: str | Path | None = None) -> Settings:
             continue
         raw = os.environ[variable].strip()
         default = getattr(SECTIONS[section](), key)
-        value: str | int | bool = raw
+        value: str | int | float | bool = raw
         if isinstance(default, bool):
             if raw.lower() not in {"true", "false", "1", "0", "yes", "no", "on", "off"}:
                 raise ConfigurationError(f"{variable} must be true or false.")
@@ -305,5 +355,12 @@ def load_settings(path: str | Path | None = None) -> Settings:
                 value = int(raw)
             except ValueError as exc:
                 raise ConfigurationError(f"{variable} must be an integer.") from exc
+        elif isinstance(default, float):
+            try:
+                value = float(raw)
+            except ValueError as exc:
+                raise ConfigurationError(f"{variable} must be a number.") from exc
+            if not math.isfinite(value):
+                raise ConfigurationError(f"{variable} must be a finite number.")
         setattr(sections[section], key, value)
     return validate_settings(Settings(**sections))

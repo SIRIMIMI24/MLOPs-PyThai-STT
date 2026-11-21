@@ -14,6 +14,7 @@ def test_doctor_succeeds_without_optional_packages(tmp_path):
 
 
 def test_missing_required_dependency_fails_doctor(monkeypatch, tmp_path, capsys):
+    monkeypatch.chdir(tmp_path)
     original = metadata.version
 
     def missing(name):

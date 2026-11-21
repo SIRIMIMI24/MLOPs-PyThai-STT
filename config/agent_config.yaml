@@ -1,0 +1,49 @@
+# Phase 8 — JARVIS Personal AI Agent Configuration
+# Offline mode is the default; switch to "online" explicitly in the UI or CLI
+# to authorize visible local browser web search and page reading.
+
+agent:
+  enabled: true
+  default_mode: "offline"            # "offline" or "online"
+  max_steps: 6
+  max_parse_retries: 2
+  tool_timeout_seconds: 25.0
+  llm_temperature: 0.2
+  llm_max_tokens: 1024
+
+browser:
+  headed: true                       # Visible Chromium window so the user sees every action
+  profile_dir: "outputs/jarvis_browser_profile"
+  search_engine: "duckduckgo"        # "duckduckgo" (HTML/lite friendly, public search)
+  navigation_timeout_ms: 20000
+  action_timeout_ms: 10000
+  max_page_chars: 4500
+  max_tabs: 5
+  viewport_width: 1280
+  viewport_height: 820
+
+memory:
+  db_path: "outputs/jarvis_memory.db"
+  max_history_messages: 16
+  max_task_logs: 50
+
+safety:
+  require_approval_for_interactive: true
+  require_approval_for_sensitive: true
+  require_approval_for_memory_save: true
+  allow_local_test_urls: false
+  blocked_schemes:
+    - "file"
+    - "javascript"
+    - "data"
+    - "chrome"
+    - "edge"
+    - "about"
+    - "ftp"
+    - "vbscript"
+
+voice:
+  push_to_talk: true
+  auto_speak_responses: true
+  wake_word_enabled: false
+  max_tts_chars: 600
