@@ -1,7 +1,8 @@
-# Thai Offline AI Workbench — Phase 5.5
+# Thai Offline AI Workbench — Complete Suite (Phases 1–8)
 
-> A privacy-first, CPU-first Thai AI workbench for local NLP, text-to-speech,
-> speech-to-text, speaker diarization, and local LLM chat.
+> A privacy-first, CPU-first Thai & English AI workbench for local NLP, text-to-speech,
+> speech-to-text, speaker diarization, local voice assistant, speech improvement lab,
+> conversation intelligence, local RAG, and the JARVIS Personal AI Agent.
 
 Thai Offline AI Workbench runs as a local Gradio application and keeps runtime
 text, audio, prompts, and generated results on the machine by default. It provides
@@ -22,6 +23,11 @@ Python **3.10 (64-bit)** is the primary supported version.
 | Evaluation | Reproducible CER, WER, RTF, error analysis, and local reports | Uses the configured local ASR backend |
 | Diarization | Anonymous `SPEAKER_00`/`SPEAKER_01` file turns, ASR composition, and live streaming fan-out | Lazy, after explicit local model setup |
 | Local LLM | Session-local chat via Ollama at `127.0.0.1` | Only on an explicit chat request |
+| Voice Assistant (Phase 6) | 100% offline `Audio -> Shared ASR -> Local LLM -> Shared TTS` with stage latency telemetry | Reuses shared ASR/TTS instances |
+| Speech Lab (Phase 6.5) | Governed dataset splits, SHA-256 leakage guard, synthetic speech + CPU augmentations, pseudo-labeling, SQLite experiment registry & promotion gate | Lazy, reuses local TTS/ASR |
+| Conversation Intel (Phase 7) | Deterministic speaker talk-share, keywords, domain terms + grounded local-LLM summary, decisions & action items | Deterministic + optional Ollama |
+| JARVIS Agent (Phase 8) | Voice/text personal agent with bounded planning, visible Playwright Chromium browser, SQLite memory, Local RAG (`rag_search`), and 3-tier approval gates | Offline Mode default; Online Mode opt-in |
+| Local RAG & Platform (P2) | SQLite hybrid Thai/English TF-IDF document retrieval, One-Click Model Manager, and `start_workbench.bat` portable packaging | Zero external embedding model required |
 
 ## Quick start
 
@@ -447,6 +453,21 @@ In the Gradio **ASR** tab, the **Near Real-Time ASR + Speaker Diarization (Phase
 5.5)** section follows the same **Preparing** → **Ready / Listening** →
 **Stopped** lifecycle and displays live `[SPEAKER_00]` / `[SPEAKER_01]` lines,
 live `Speaker Turns`, and combined ASR + diarization RTF metrics.
+
+## Phases 6 – 8 & P2 Platform Features
+
+- **Phase 6 — Local Voice Assistant** ([`docs/PHASE6_VOICE_ASSISTANT.md`](docs/PHASE6_VOICE_ASSISTANT.md)):
+  Direct 100% offline voice-to-voice (`voice-assistant` CLI or inside the **Local LLM** tab) reusing shared `ASRAdapter` and `TTSAdapter` instances with measured `ASR / LLM / TTS / Total` latency.
+- **Phase 6.5 — Speech AI Continuous Improvement Lab** ([`docs/PHASE6_5_SPEECH_LAB.md`](docs/PHASE6_5_SPEECH_LAB.md)):
+  Dataset split separation & SHA-256 leakage checks, synthetic speech + CPU augmentations (`lab-generate-synthetic`), controlled pseudo-labeling (`lab-pseudo-label`), and SQLite experiment tracking + anti-degradation promotion gate (`lab-evaluate-promote`).
+- **Phase 7 — Conversation Intelligence** ([`docs/PHASE7_CONVERSATION_INTELLIGENCE.md`](docs/PHASE7_CONVERSATION_INTELLIGENCE.md)):
+  Deterministic speaker talk-share, keywords, and domain-term hits plus grounded local-LLM summary, decisions, and action items citing real utterance indexes (`conversation-intel`).
+- **Phase 8 — JARVIS Personal AI Agent** ([`docs/JARVIS_PHASE8_SPEC.md`](docs/JARVIS_PHASE8_SPEC.md), [`docs/JARVIS_SECURITY_MODEL.md`](docs/JARVIS_SECURITY_MODEL.md)):
+  Dedicated **JARVIS AI Assistant** tab and `jarvis` CLI command with Offline Mode (default) and Online Agent Mode (visible headed Playwright Chromium in an isolated profile, installable via `python scripts/setup_playwright.py`), SQLite memory, Local RAG (`rag_search`), and 3-tier safety/approval dialogs.
+- **Local RAG, One-Click Model Manager & Portable Launcher**:
+  - `thai-offline-ai rag --ingest doc.md --ask "คำถาม"` (or **Local RAG Knowledge Base** in the **Local LLM** tab)
+  - `thai-offline-ai models` (or **One-Click Model Manager** in the **System** tab)
+  - `start_workbench.bat` and `thai-offline-ai package-portable` for one-click Windows desktop startup.
 
 ## CLI and configuration
 

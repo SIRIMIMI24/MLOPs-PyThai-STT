@@ -16,7 +16,7 @@
 | 6 | Local voice assistant | Complete |
 | 6.5 | Speech AI Continuous Improvement Lab: synthetic speech, pseudo-labeling, self-training, fine-tuning, experiment tracking, model promotion | Complete |
 | 7 | Conversation intelligence | Complete |
-| 8 | JARVIS Personal AI Agent: local visible browser agent, validated Local LLM orchestrator, voice-controlled assistant, SQLite memory, and 3-tier safety/approval controls (see `docs/JARVIS_PHASE8_SPEC.md`) | Implemented (Playwright optional setup) |
+| 8 | JARVIS Personal AI Agent: local visible browser agent, validated Local LLM orchestrator, voice-controlled assistant, SQLite memory, and 3-tier safety/approval controls (see `docs/JARVIS_PHASE8_SPEC.md`) | Complete |
 
 ## Phase 3.7: real-human ASR evaluation
 
